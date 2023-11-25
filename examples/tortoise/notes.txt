@@ -1,0 +1,45 @@
+https://github.com/ggerganov/ggml/blob/master/src/ggml-cuda.cu
+Where ggml seems to have actual cuda implementations of stuff
+
+
+
+cmake command for cuda:
+
+
+cd into build
+cmake -DGGML_CUBLAS=ON -DCMAKE_CUDA_COMPILER=/usr/bin/nvcc ..
+make
+
+
+to run 
+
+build/bin/tortoise
+
+for running gpt2 for comparison
+
+ ./bin/gpt-2 -m ../examples/gpt-2/models/gpt-2-117M/ggml-model.bin -p "This is an example"
+
+for printing the ggml graph:
+    
+ggml_graph_print(gf);
+
+
+
+
+current status:
+
+
+11/11/2023
+
+need to look at how pytorch actually does the 1d convolution
+look at input and output shapes, then see if we can get the same behavior. 
+It seems like we are able to load both the weight and bias tensors, but there is a failure in the process of 
+
+11/19/2023
+
+seems like we can start from text embedding, working on getting embedding retrieval working in ggml. We will load the auto-conditioning tensor instead of calculating it, because it does not depend on 
+the text the user provides.
+
+We are trying to use ggml_get_rows, to retrieve the embeddings for some particular tokens. When trying to print out the resulting tensor, we are getting a seg fault.
+
+

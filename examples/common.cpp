@@ -14,6 +14,7 @@
 #include <locale>
 #include <codecvt>
 #include <sstream>
+#include <iostream>
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -265,7 +266,7 @@ std::wstring convert_to_wstring(const std::string & input) {
 }
 
 void gpt_split_words(std::string str, std::vector<std::string>& words) {
-    const std::string pattern = R"('s|'t|'re|'ve|'m|'ll|'d| ?[[:alpha:]]+| ?[[:digit:]]+| ?[^\s[:alpha:][:digit:]]+|\s+(?!\S)|\s+)";
+    const std::string pattern = R"(\[SPACE\]|\[UNK\]|\[STOP\]|'s|'t|'re|'ve|'m|'ll|'d| ?[[:alpha:]]+| ?[[:digit:]]+| ?[^\s\[\][:alpha:][:digit:]]+|\s+(?!\S)|\s+)";
     const std::regex re(pattern);
     std::smatch m;
 
@@ -274,6 +275,11 @@ void gpt_split_words(std::string str, std::vector<std::string>& words) {
             words.push_back(x);
         }
         str = m.suffix();
+    }
+
+    for (auto word: words)
+    {
+        std::cout << word << std::endl;
     }
 }
 
@@ -319,6 +325,7 @@ std::vector<gpt_vocab::id> gpt_tokenize(const gpt_vocab & vocab, const std::stri
         for (int i = 0; i < (int) word.size(); ){
             for (int j = word.size() - 1; j >= i; j--){
                 auto cand = word.substr(i, j-i+1);
+                std::cout << cand << std::endl;
                 auto it = vocab.token_to_id.find(cand);
                 if (it != vocab.token_to_id.end()){ // word.substr(i, j-i+1) in vocab
                     tokens.push_back(it->second);

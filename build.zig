@@ -6,6 +6,7 @@ const builtin = @import("builtin");
 // Zig Run Command: zig build -h
 //     zig build run_dolly-v2
 //     zig build run_gpt-2
+//     zig build run_tortoise
 //     zig build run_gpt-j
 //     zig build run_gpt-neox
 //     zig build run_mnist
@@ -46,6 +47,7 @@ pub fn build(b: *std.build.Builder) void {
     const examples = .{
         "dolly-v2",
         "gpt-2",
+        "tortoise",
         "gpt-j",
         "gpt-neox",
         "mnist",
