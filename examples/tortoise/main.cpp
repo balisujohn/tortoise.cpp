@@ -1168,7 +1168,10 @@ int main(int argc, char ** argv) {
     gpt_vocab_init("../examples/tortoise/tokenizer.json", vocab);
     
     std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
-    std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
+    //std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
+    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
+
 
     for (int i =0; i < tokens.size(); i ++)
     {
@@ -1242,15 +1245,28 @@ int main(int argc, char ** argv) {
         std::cout << "reaced end" << std::endl;
 
         ggml_tensor * test = gf->nodes[gf->n_nodes - 1];
+        ggml_tensor * weights = gf->leafs[gf->n_leafs -2];
+        ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
+
         ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
-        std::vector<float> test_read(13*1024);
-        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 13 * 1024  );
+        std::vector<float> test_read(1024*16);
+        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 1024 * 16);
 
 
-        for (auto entry: test_read)
+
+
+       // for (auto entry: test_read)
+       // {
+       //     std::cout << entry << std::endl;
+       // }
+
+        //std::cout << test_read[0] << std::endl;
+        for (int i = 0; i < 1024; i++)
         {
-            std::cout << entry << std::endl;
+            std::cout << (test_read.data()[i])<< std::endl;
         }
+
+        ggml_graph_print   (gf);
 
 
         //std::cout << (float * )test->data << std::endl;

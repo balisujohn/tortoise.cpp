@@ -43,3 +43,9 @@ the text the user provides.
 We are trying to use ggml_get_rows, to retrieve the embeddings for some particular tokens. When trying to print out the resulting tensor, we are getting a seg fault.
 
 
+11/29/2023
+inference is yielding numbers with get_rows, but the numbers aren't matching, the problem seems to be upstream of get_rows in the model weights load, but there
+may also be a problem in get_rows since it doesn't seem like the embeddings match even the loaded embeddings which dont seem to match what they should be 
+
+11/30/2023
+numbers from get_rows are now matching, I was calling torch.save() before loading the state dict so random weights were getting saved
