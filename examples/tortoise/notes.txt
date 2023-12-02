@@ -48,4 +48,9 @@ inference is yielding numbers with get_rows, but the numbers aren't matching, th
 may also be a problem in get_rows since it doesn't seem like the embeddings match even the loaded embeddings which dont seem to match what they should be 
 
 11/30/2023
-numbers from get_rows are now matching, I was calling torch.save() before loading the state dict so random weights were getting saved
+numbers from get_rows are now matching, I was calling torch.save() before loading the state dict so random weights were getting saved. The next step is getting the position embedding
+and also making sure the numbers match there, then the combined embedding and making sure the numbers match there. 
+
+
+12/2/2023
+text position embedding now also working and successfulyl combining with normal text embedding, onto next steps
