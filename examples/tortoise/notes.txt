@@ -54,3 +54,8 @@ and also making sure the numbers match there, then the combined embedding and ma
 
 12/2/2023
 text position embedding now also working and successfulyl combining with normal text embedding, onto next steps
+
+12/3/2023
+I need to concat the fixed conditioning latent with the embedding tesnor, it seems like ggml doesn't support the ggml_concat op for 
+cuda, so I will try adding this op. 
+

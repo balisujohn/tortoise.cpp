@@ -54,6 +54,9 @@ struct autoregressive_model{
     //struct ggml_tensor * init_conv_weights;
     //struct ggml_tensor * init_conv_bias;
 
+
+    struct ggml_tensor * conditioning_latent;
+
     struct ggml_tensor * text_embedding_weights;
     struct ggml_tensor * text_position_embedding_weights;
 
@@ -137,12 +140,13 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
     buffer_size += 404 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // text position embedding weights
 
+    buffer_size += 1 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning latent
 
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)2,
+            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)3,
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
@@ -196,6 +200,8 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
         model.text_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024, 256);
         model.text_position_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,404);
+        model.conditioning_latent = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,1);
+
 
         //model.init_conv_bias = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1,1024);
 
@@ -207,6 +213,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
         model.tensors["text_embedding.weight"] = model.text_embedding_weights;
         model.tensors["text_pos_embedding.emb.weight"] = model.text_position_embedding_weights;
+        model.tensors["conditioning_latent"] = model.conditioning_latent;
 
  {
         ggml_allocr * alloc = ggml_allocr_new_from_buffer(model.buffer_w);
@@ -324,7 +331,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*5 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*8 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -362,7 +369,15 @@ struct ggml_cgraph * autoregressive_graph(
     struct ggml_tensor * text_embedding = ggml_get_rows(ctx0, model.text_embedding_weights,input);
     struct ggml_tensor * text_position_embedding = ggml_get_rows(ctx0, model.text_position_embedding_weights,position);
 
-    struct ggml_tensor * output = ggml_add(ctx0,text_embedding, text_position_embedding);
+
+    struct ggml_tensor * reshaped_latent = ggml_reshape_4d(ctx0, model.conditioning_latent, 1,1,1,1024);
+
+    struct ggml_tensor * embedding = ggml_add(ctx0,text_embedding, text_position_embedding);
+
+    struct ggml_tensor * reshaped_embedding = ggml_reshape_4d(ctx0, embedding, 1,1,token_count,1024);
+
+    struct ggml_tensor * output = ggml_concat(ctx0, reshaped_embedding, reshaped_latent);
+
 
     std::cout << "didn't reach here" << std::endl;
 
