@@ -411,6 +411,7 @@ static_assert(sizeof(block_q6_K) == sizeof(ggml_fp16_t) + 13*QK_K/16, "wrong q6_
 #define WARP_SIZE 32
 #define MATRIX_ROW_PADDING 512 // last row of quant. matrices is a multiple of this to avoid out-of-bounds memory accesses
 
+#define CUDA_CONCAT_SIZE 256
 #define CUDA_ADD_BLOCK_SIZE 256
 #define CUDA_MUL_BLOCK_SIZE 256
 #define CUDA_GELU_BLOCK_SIZE 256
@@ -486,6 +487,22 @@ static __global__ void add_f32(const float * x, const float * y, float * dst, co
     }
     dst[i] = x[i] + y[i%ky];
 }
+
+static __global__ void concat_f32(const float * x, const float * y, float * dst, const int dst_size, const int src0_size, const int src0_dim0,const int src0_dim1,const int src0_dim2,const int src0_dim3) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+
+    if (i >= dst_size) {
+        return;
+    }
+    if (i < src0_size)
+    {
+        dst[i] =  x[i];
+    }
+    else{
+        dst[i] = y[i - src0_size];
+    }
+}
+
 
 static __global__ void add_f16_f32_f16(const half * x, const float * y, half * dst, const int k) {
     const int i = blockDim.x*blockIdx.x + threadIdx.x;
@@ -4611,6 +4628,15 @@ static void add_f32_cuda(const float * x, const float * y, float * dst, const in
     add_f32<<<num_blocks, CUDA_ADD_BLOCK_SIZE, 0, stream>>>(x, y, dst, kx, ky);
 }
 
+
+static void concat_f32_cuda(const float * x, const float * y, float * dst, const int src0_dim0,const int src0_dim1,const int src0_dim2,const int src0_dim3, const int combined_dim_2, cudaStream_t stream) {
+    const int dst_size = src0_dim0 * src0_dim1 * combined_dim_2 * src0_dim3;
+    const int src0_size = src0_dim0 * src0_dim1 * src0_dim2 * src0_dim3;
+    const int num_blocks = (dst_size + CUDA_CONCAT_SIZE - 1) / CUDA_CONCAT_SIZE;
+    concat_f32<<<num_blocks, CUDA_CONCAT_SIZE, 0, stream>>>(x, y, dst, dst_size, src0_size, src0_dim0, src0_dim1, src0_dim2, src0_dim3);
+}
+
+
 static void add_f16_f32_f16_cuda(const half * x, const float * y, half * dst, const int k, cudaStream_t stream) {
     const int num_blocks = (k + CUDA_ADD_BLOCK_SIZE - 1) / CUDA_ADD_BLOCK_SIZE;
     add_f16_f32_f16<<<num_blocks, CUDA_ADD_BLOCK_SIZE, 0, stream>>>(x, y, dst, k);
@@ -5896,6 +5922,36 @@ static void ggml_cuda_op_get_rows(
     }
 }
 
+//this op added by john balis
+inline void ggml_cuda_op_concat(
+    const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst,
+    const float * src0_dd, const float * src1_dd, float * dst_dd, const cudaStream_t & main_stream){
+    
+    // for now, we'll assert both source tensors are float32
+    GGML_ASSERT(src0->type == GGML_TYPE_F32);
+    GGML_ASSERT(src1->type == GGML_TYPE_F32);
+
+    const int64_t src1_dim0 = src1->ne[0];
+    const int64_t src1_dim1 = src1->ne[1];
+    const int64_t src1_dim2 = src1->ne[2];
+    const int64_t src1_dim3 = src1->ne[3];
+
+    const int64_t src0_dim0 = src0->ne[0];
+    const int64_t src0_dim1 = src0->ne[1];
+    const int64_t src0_dim2 = src0->ne[2];
+    const int64_t src0_dim3 = src0->ne[3];
+
+    GGML_ASSERT(src0_dim0 == src1_dim0);
+    GGML_ASSERT(src0_dim1 == src1_dim1);
+    GGML_ASSERT(src0_dim3 == src1_dim3);
+
+
+    concat_f32_cuda(src0_dd, src1_dd, dst_dd, src0_dim0, src0_dim1 , src0_dim2 , src0_dim3 , src0_dim2 + src1_dim2, main_stream);
+
+
+    }
+
+
 inline void ggml_cuda_op_add(
     const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst,
     const float * src0_dd, const float * src1_dd, float * dst_dd, const cudaStream_t & main_stream) {
@@ -6952,6 +7008,10 @@ static void ggml_cuda_add(const ggml_tensor * src0, const ggml_tensor * src1, gg
     ggml_cuda_op_flatten(src0, src1, dst, ggml_cuda_op_add);
 }
 
+static void ggml_cuda_concat(const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
+    ggml_cuda_op_flatten(src0, src1, dst, ggml_cuda_op_concat);
+}
+
 static void ggml_cuda_mul(const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
     ggml_cuda_op_flatten(src0, src1, dst, ggml_cuda_op_mul);
 }
@@ -7636,6 +7696,9 @@ bool ggml_cuda_compute_forward(struct ggml_compute_params * params, struct ggml_
     switch (tensor->op) {
         case GGML_OP_REPEAT:
             func = ggml_cuda_repeat;
+            break;
+        case GGML_OP_CONCAT:
+            func = ggml_cuda_concat;
             break;
         case GGML_OP_GET_ROWS:
             func = ggml_cuda_get_rows;

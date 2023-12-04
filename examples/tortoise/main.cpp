@@ -376,7 +376,7 @@ struct ggml_cgraph * autoregressive_graph(
 
     struct ggml_tensor * reshaped_embedding = ggml_reshape_4d(ctx0, embedding, 1,1,token_count,1024);
 
-    struct ggml_tensor * output = ggml_concat(ctx0, reshaped_embedding, reshaped_latent);
+    struct ggml_tensor * output = ggml_concat(ctx0, reshaped_latent, reshaped_embedding);
 
 
     std::cout << "didn't reach here" << std::endl;
@@ -483,8 +483,8 @@ int main(int argc, char ** argv) {
         ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
 
         ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
-        std::vector<float> test_read(1024*16);
-        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 1024 * 16);
+        std::vector<float> test_read(1024*17);
+        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 1024 * 17);
 
 
 
@@ -495,7 +495,7 @@ int main(int argc, char ** argv) {
        // }
 
         //std::cout << test_read[0] << std::endl;
-        for (int i = 0; i < 1024; i++)
+        for (int i = 1024*16; i < 1024*17; i++)
         {
             std::cout << (test_read.data()[i])<< std::endl;
         }
