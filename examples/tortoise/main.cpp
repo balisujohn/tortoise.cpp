@@ -28,7 +28,7 @@
 #endif
 
 
-
+int32_t NUM_RETURN_SEQUENCES = 4; //hardcoding this for now, analagous to "num_return_sequences arugment to inference_speech"
 
 
 struct autoregressive_hparams{
@@ -59,6 +59,10 @@ struct autoregressive_model{
 
     struct ggml_tensor * text_embedding_weights;
     struct ggml_tensor * text_position_embedding_weights;
+
+    struct ggml_tensor * mel_embedding_weights; 
+    struct ggml_tensor * mel_position_embedding_weights;
+    
 
 
     struct ggml_context * ctx;
@@ -142,11 +146,16 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
     buffer_size += 1 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning latent
 
+    buffer_size +=  8194 * 1024 * ggml_type_sizef(GGML_TYPE_F32);// mel embedding weight 
+
+    buffer_size += 608 * 1024 * ggml_type_sizef(GGML_TYPE_F32);
+
+
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)3,
+            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)5,
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
@@ -201,7 +210,8 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         model.text_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024, 256);
         model.text_position_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,404);
         model.conditioning_latent = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,1);
-
+        model.mel_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,8194);
+        model.mel_position_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,608);
 
         //model.init_conv_bias = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1,1024);
 
@@ -331,7 +341,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*8 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*9 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -376,12 +386,34 @@ struct ggml_cgraph * autoregressive_graph(
 
     struct ggml_tensor * reshaped_embedding = ggml_reshape_4d(ctx0, embedding, 1,1,token_count,1024);
 
+    struct ggml_tensor * fake_inputs = ggml_new_tensor_2d(ctx0, GGML_TYPE_I32, 1, token_count+2); 
+    ggml_allocr_alloc(allocr, fake_inputs);
+    if (!ggml_allocr_is_measure(allocr)) {
+        int32_t v = 1;
+        int32_t start_mel_token = 8192;
+        for (int i = 0; i < token_count+1; ++i) {
+            ggml_backend_tensor_set(fake_inputs, &v, i*sizeof(int32_t), sizeof(v));
+        }
+        ggml_backend_tensor_set(fake_inputs, &start_mel_token, (token_count+1)*sizeof(int32_t), sizeof(start_mel_token));
+
+    }
+
+    int32_t truncation_index = token_count + 2;
+
+    
+
+    //struct ggml * mel_transformer_inputs =   ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, token_count);
+    //todo this needs to repeat "fake_input" 4 times using the hardcoded result count
+
+
     struct ggml_tensor * output = ggml_concat(ctx0, reshaped_latent, reshaped_embedding);
+
+
 
 
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, output);
+    ggml_build_forward_expand(gf, fake_inputs);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -396,7 +428,7 @@ struct ggml_cgraph * autoregressive_graph(
 int main(int argc, char ** argv) {
 
     std::cout << "hello world" << std::endl;
-
+    
 
     gpt_vocab vocab;
     gpt_vocab_init("../examples/tortoise/tokenizer.json", vocab);
@@ -478,14 +510,14 @@ int main(int argc, char ** argv) {
 
         std::cout << "reaced end" << std::endl;
 
-        ggml_tensor * test = gf->nodes[gf->n_nodes - 1];
+        ggml_tensor * test = gf->leafs[gf->n_leafs - 1];
         ggml_tensor * weights = gf->leafs[gf->n_leafs -2];
         ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
 
         ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
-        std::vector<float> test_read(1024*17);
-        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 1024 * 17);
-
+        std::vector<int> test_read(18);
+        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(int)* 18);
+        std::cout << "reached" << std::endl;
 
 
 
@@ -495,7 +527,7 @@ int main(int argc, char ** argv) {
        // }
 
         //std::cout << test_read[0] << std::endl;
-        for (int i = 1024*16; i < 1024*17; i++)
+        for (int i = 0; i < 18; i++)
         {
             std::cout << (test_read.data()[i])<< std::endl;
         }
