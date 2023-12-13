@@ -341,7 +341,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*9 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*12 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -386,7 +386,7 @@ struct ggml_cgraph * autoregressive_graph(
 
     struct ggml_tensor * reshaped_embedding = ggml_reshape_4d(ctx0, embedding, 1,1,token_count,1024);
 
-    struct ggml_tensor * fake_inputs = ggml_new_tensor_2d(ctx0, GGML_TYPE_I32, 1, token_count+2); 
+    struct ggml_tensor * fake_inputs = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,  token_count+2); 
     ggml_allocr_alloc(allocr, fake_inputs);
     if (!ggml_allocr_is_measure(allocr)) {
         int32_t v = 1;
@@ -402,7 +402,13 @@ struct ggml_cgraph * autoregressive_graph(
 
     
 
-    //struct ggml * mel_transformer_inputs =   ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, token_count);
+    struct ggml_tensor * mel_transformer_inputs =   ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,4*( token_count+2));
+    ggml_allocr_alloc(allocr, mel_transformer_inputs);
+    mel_transformer_inputs = ggml_repeat(ctx0, fake_inputs, mel_transformer_inputs);
+    
+    mel_transformer_inputs = ggml_reshape_2d(ctx0, mel_transformer_inputs, 4, (token_count + 2));
+
+
     //todo this needs to repeat "fake_input" 4 times using the hardcoded result count
 
 
@@ -413,7 +419,7 @@ struct ggml_cgraph * autoregressive_graph(
 
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, fake_inputs);
+    ggml_build_forward_expand(gf, output);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -510,13 +516,13 @@ int main(int argc, char ** argv) {
 
         std::cout << "reaced end" << std::endl;
 
-        ggml_tensor * test = gf->leafs[gf->n_leafs - 1];
+        ggml_tensor * test = gf->nodes[gf->n_nodes - 1];
         ggml_tensor * weights = gf->leafs[gf->n_leafs -2];
         ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
 
         ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
-        std::vector<int> test_read(18);
-        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(int)* 18);
+        std::vector<float> test_read(17 * 1024);
+        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 17* 1024);
         std::cout << "reached" << std::endl;
 
 
@@ -525,14 +531,19 @@ int main(int argc, char ** argv) {
        // {
        //     std::cout << entry << std::endl;
        // }
+        ggml_graph_print   (gf);
+
+        std::cout << "First and last three numbers of result of concatenating conditioning latent with embedded sum of text embedding and text position embedding" << std::endl;
 
         //std::cout << test_read[0] << std::endl;
-        for (int i = 0; i < 18; i++)
+        for (int i = 0; i < 17 * 1024; i++)
         {
+            if (i < 3 || i > 17*1024 - 4)
+            {
             std::cout << (test_read.data()[i])<< std::endl;
+            }
         }
 
-        ggml_graph_print   (gf);
 
 
         //std::cout << (float * )test->data << std::endl;
