@@ -148,7 +148,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
     buffer_size +=  8194 * 1024 * ggml_type_sizef(GGML_TYPE_F32);// mel embedding weight 
 
-    buffer_size += 608 * 1024 * ggml_type_sizef(GGML_TYPE_F32);
+    buffer_size += 608 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // mel position embedding weight
 
 
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
@@ -224,6 +224,8 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         model.tensors["text_embedding.weight"] = model.text_embedding_weights;
         model.tensors["text_pos_embedding.emb.weight"] = model.text_position_embedding_weights;
         model.tensors["conditioning_latent"] = model.conditioning_latent;
+        model.tensors["mel_embedding.weight"] = model.mel_embedding_weights;
+        model.tensors["mel_pos_embedding.emb.weight"] = model.mel_position_embedding_weights;        
 
  {
         ggml_allocr * alloc = ggml_allocr_new_from_buffer(model.buffer_w);
@@ -341,7 +343,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*12 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*17 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -404,12 +406,34 @@ struct ggml_cgraph * autoregressive_graph(
 
     struct ggml_tensor * mel_transformer_inputs =   ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,4*( token_count+2));
     ggml_allocr_alloc(allocr, mel_transformer_inputs);
+    
     mel_transformer_inputs = ggml_repeat(ctx0, fake_inputs, mel_transformer_inputs);
     
-    mel_transformer_inputs = ggml_reshape_2d(ctx0, mel_transformer_inputs, 4, (token_count + 2));
+    mel_transformer_inputs = ggml_reshape_2d(ctx0, mel_transformer_inputs, 4, (token_count + 2)); 
 
 
-    //todo this needs to repeat "fake_input" 4 times using the hardcoded result count
+    struct ggml_tensor * truncated_mel_transformer_inputs = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,4); //hardcoding this instead of slicing it from mel_transformer_inputs
+    ggml_allocr_alloc(allocr, truncated_mel_transformer_inputs);
+    if (!ggml_allocr_is_measure(allocr)) {
+        int32_t start_mel_token = 8192;
+        for (int i = 0; i < 4; ++i) {
+            ggml_backend_tensor_set(truncated_mel_transformer_inputs, &start_mel_token, i*sizeof(int32_t), sizeof(start_mel_token));
+        }
+    }
+
+    struct ggml_tensor * mel_embedding = ggml_get_rows(ctx0, model.mel_embedding_weights,truncated_mel_transformer_inputs);
+
+
+    struct ggml_tensor * mel_position = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, 1);
+    ggml_allocr_alloc(allocr, mel_position);
+    if (!ggml_allocr_is_measure(allocr)) {
+            int32_t v = 0;
+            ggml_backend_tensor_set(mel_position, &v, 0, sizeof(v));
+    }
+
+    struct ggml_tensor * mel_position_embedding = ggml_get_rows(ctx0, model.mel_position_embedding_weights,mel_position);
+
+    mel_embedding = ggml_add(ctx0,mel_embedding, mel_position_embedding);
 
 
     struct ggml_tensor * output = ggml_concat(ctx0, reshaped_latent, reshaped_embedding);
@@ -419,7 +443,7 @@ struct ggml_cgraph * autoregressive_graph(
 
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, mel_transformer_inputs);
+    ggml_build_forward_expand(gf, mel_embedding);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -517,12 +541,13 @@ int main(int argc, char ** argv) {
         std::cout << "reaced end" << std::endl;
 
         ggml_tensor * test = gf->nodes[gf->n_nodes - 1];
-        ggml_tensor * weights = gf->leafs[gf->n_leafs -2];
-        ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
+        //ggml_tensor * weights = gf->leafs[gf->n_leafs -2];
+        //ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
 
-        ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
-        std::vector<int> test_read(4 * (18));
-        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(int) * 4 * (18));
+        //ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
+        std::cout << "made it here" << std::endl;
+        std::vector<float> test_read(4 * 1024);
+        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float) * 4 * 1024);
         std::cout << "reached" << std::endl;
 
 
@@ -535,7 +560,7 @@ int main(int argc, char ** argv) {
 
 
         //std::cout << test_read[0] << std::endl;
-        for (int i = 0; i < 4 * (18); i++)
+        for (int i = 0; i < 4  * 1024 ; i++)
         {
             std::cout << (test_read.data()[i])<< std::endl;
         }
@@ -552,176 +577,6 @@ int main(int argc, char ** argv) {
         
     }
 
-
-    exit(0);
-    /*
-    ggml_time_init();
-
-    const int64_t t_main_start_us = ggml_time_us();
-
-    gpt_params params;
-    params.model = "models/gpt-2-117M/ggml-model.bin";
-
-    if (gpt_params_parse(argc, argv, params) == false) {
-        return 1;
-    }
-
-    if (params.seed < 0) {
-        params.seed = time(NULL);
-    }
-
-    printf("%s: seed = %d\n", __func__, params.seed);
-
-    std::mt19937 rng(params.seed);
-    if (params.prompt.empty()) {
-        params.prompt = gpt_random_prompt(rng);
-    }
-
-    int64_t t_load_us = 0;
-
-    gpt_vocab vocab;
-    gpt2_model model;
-
-    // load the model
-    {
-        const int64_t t_start_us = ggml_time_us();
-
-        if (!gpt2_model_load(params.model, model, vocab, params.n_ctx, params.n_gpu_layers)) {
-            fprintf(stderr, "%s: failed to load model from '%s'\n", __func__, params.model.c_str());
-            return 1;
-        }
-
-        t_load_us = ggml_time_us() - t_start_us;
-
-        test_gpt_tokenizer(vocab, params.token_test);
-    }
-
-    // keep this buffer alive while evaluating the model
-    ggml_backend_buffer_t buf_compute;
-
-    struct ggml_allocr * allocr = NULL;
-    // allocate the compute buffer
-    {
-         // alignment required by the backend
-        size_t align = ggml_backend_get_alignment(model.backend);
-        allocr = ggml_allocr_new_measure(align);
-
-        // create the worst case graph for memory usage estimation
-        int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
-        int n_past = model.hparams.n_ctx - n_tokens;
-        struct ggml_cgraph * gf = gpt2_graph(model, allocr, n_past, std::vector<gpt_vocab::id>(n_tokens, 0));
-
-        // compute the required memory
-        size_t mem_size = ggml_allocr_alloc_graph(allocr, gf);
-
-        // recreate the allocator with the required memory
-        ggml_allocr_free(allocr);
-        buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
-        allocr = ggml_allocr_new_from_buffer(buf_compute);
-
-        fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
-    }
-
-    int n_past = 0;
-
-    int64_t t_sample_us  = 0;
-    int64_t t_predict_us = 0;
-
-    std::vector<float> logits;
-
-    // tokenize the prompt
-    std::vector<gpt_vocab::id> embd_inp = ::gpt_tokenize(vocab, params.prompt);
-
-    params.n_predict = std::min(params.n_predict, model.hparams.n_ctx - (int) embd_inp.size());
-
-    printf("%s: prompt: '%s'\n", __func__, params.prompt.c_str());
-    printf("%s: number of tokens in prompt = %zu, first 8 tokens: ", __func__, embd_inp.size());
-    for (int i = 0; i < std::min(8, (int) embd_inp.size()); i++) {
-        printf("%d ", embd_inp[i]);
-    }
-    printf("\n\n");
-
-    // submit the input prompt token-by-token
-    // this reduces the memory usage during inference, at the cost of a bit of speed at the beginning
-    std::vector<gpt_vocab::id> embd;
-
-    for (size_t i = embd.size(); i < embd_inp.size() + params.n_predict; i++) {
-        // predict
-        if (embd.size() > 0) {
-            const int64_t t_start_us = ggml_time_us();
-
-            if (!gpt2_eval(model, allocr, params.n_threads, n_past, embd, logits)) {
-                printf("Failed to predict\n");
-                return 1;
-            }
-
-            t_predict_us += ggml_time_us() - t_start_us;
-        }
-
-        n_past += embd.size();
-        embd.clear();
-
-        if (i >= embd_inp.size()) {
-            // sample next token
-            const int   top_k = params.top_k;
-            const float top_p = params.top_p;
-            const float temp  = params.temp;
-
-            const int n_vocab = model.hparams.n_vocab;
-
-            gpt_vocab::id id = 0;
-
-            {
-                const int64_t t_start_sample_us = ggml_time_us();
-
-                id = gpt_sample_top_k_top_p(vocab, logits.data() + (logits.size() - n_vocab), top_k, top_p, temp, rng);
-
-                t_sample_us += ggml_time_us() - t_start_sample_us;
-            }
-
-            // add it to the context
-            embd.push_back(id);
-        } else {
-            // if here, it means we are still processing the input prompt
-            for (size_t k = i; k < embd_inp.size(); k++) {
-                embd.push_back(embd_inp[k]);
-                if (int32_t(embd.size()) >= params.n_batch) {
-                    break;
-                }
-            }
-            i += embd.size() - 1;
-        }
-
-        // display text
-        for (auto id : embd) {
-            printf("%s", vocab.id_to_token[id].c_str());
-        }
-        fflush(stdout);
-
-        // end of text token
-        if (!params.ignore_eos && embd.back() == 50256) {
-            break;
-        }
-    }
-
-    // report timing
-    {
-        const int64_t t_main_end_us = ggml_time_us();
-
-        printf("\n\n");
-        printf("%s:     load time = %8.2f ms\n", __func__, t_load_us/1000.0f);
-        printf("%s:   sample time = %8.2f ms\n", __func__, t_sample_us/1000.0f);
-        printf("%s:  predict time = %8.2f ms / %.2f ms per token\n", __func__, t_predict_us/1000.0f, t_predict_us/1000.0f/n_past);
-        printf("%s:    total time = %8.2f ms\n", __func__, (t_main_end_us - t_main_start_us)/1000.0f);
-    }
-
-    ggml_free(model.ctx);
-
-    ggml_backend_buffer_free(model.buffer_w);
-    ggml_backend_buffer_free(model.buffer_kv);
-    ggml_backend_buffer_free(buf_compute);
-    ggml_backend_free(model.backend);
-
     return 0;
-    */
+  
 }
