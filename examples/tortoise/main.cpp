@@ -533,7 +533,6 @@ int main(int argc, char ** argv) {
        // }
         ggml_graph_print   (gf);
 
-        std::cout << "First and last three numbers of result of concatenating conditioning latent with embedded sum of text embedding and text position embedding" << std::endl;
 
         //std::cout << test_read[0] << std::endl;
         for (int i = 0; i < 4 * (18); i++)
