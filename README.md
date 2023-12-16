@@ -1,5 +1,5 @@
 # GGML implementation of tortoise-tts, under construction
-Implementation statues:
+Implementation status:
 
 Tokenization seems to work, but doesn't exactly match the tokenization tortoise-tts performs, needs work. 
 
