@@ -419,7 +419,7 @@ struct ggml_cgraph * autoregressive_graph(
 
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, output);
+    ggml_build_forward_expand(gf, mel_transformer_inputs);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -449,7 +449,7 @@ int main(int argc, char ** argv) {
     {
         std::cout << tokens[i] << std::endl;
     }   
-    //todo see why this tokenization doesn't match the tokenization produced by tortoise-tts (tortoise tts one does not always use the largest possible token)
+    //todo see why this tokenization doesn't match the tokenization produced by tortoise-tts (tortoise tts one does not always use the token corresponding to the most characters)
 
 
     ggml_time_init();
@@ -521,8 +521,8 @@ int main(int argc, char ** argv) {
         ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
 
         ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
-        std::vector<float> test_read(17 * 1024);
-        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 17* 1024);
+        std::vector<int> test_read(4 * (18));
+        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(int) * 4 * (18));
         std::cout << "reached" << std::endl;
 
 
@@ -536,12 +536,9 @@ int main(int argc, char ** argv) {
         std::cout << "First and last three numbers of result of concatenating conditioning latent with embedded sum of text embedding and text position embedding" << std::endl;
 
         //std::cout << test_read[0] << std::endl;
-        for (int i = 0; i < 17 * 1024; i++)
+        for (int i = 0; i < 4 * (18); i++)
         {
-            if (i < 3 || i > 17*1024 - 4)
-            {
             std::cout << (test_read.data()[i])<< std::endl;
-            }
         }
 
 
