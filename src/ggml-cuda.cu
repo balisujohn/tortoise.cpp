@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <atomic>
 #include <assert.h>
+#include <iostream>
+#include <stdio.h>
 
 #if defined(GGML_USE_HIPBLAS)
 #include <hip/hip_runtime.h>
@@ -488,19 +490,50 @@ static __global__ void add_f32(const float * x, const float * y, float * dst, co
     dst[i] = x[i] + y[i%ky];
 }
 
-static __global__ void concat_f32(const float * x, const float * y, float * dst, const int dst_size, const int src0_size, const int src0_dim0,const int src0_dim1,const int src0_dim2,const int src0_dim3) {
+static __global__ void concat_f32(const float * x, const float * y, float * dst, const int dst_size, const int src0_size, const int src0_dim0,const int src0_dim1,const int src0_dim2,const int src0_dim3, const int src1_dim2) {
     const int i = blockDim.x*blockIdx.x + threadIdx.x;
+
+    const int x_123_block_size =  src0_dim1 * src0_dim2 *src0_dim3; 
+    const int x_23_block_size =  src0_dim2 *src0_dim3; 
+
+    const int y_123_block_size =  src0_dim1 * src1_dim2 *src0_dim3; 
+    const int y_23_block_size =  src1_dim2 *src0_dim3; 
+
+
+    const int dim_123_block_size = src0_dim1 * (src0_dim2 + src1_dim2) *src0_dim3; 
+    const int dim_23_block_size =  (src0_dim2 + src1_dim2) *src0_dim3;
+    const int dim_3_block_size = src0_dim3;
+
+    const int dim_0_index = i / dim_123_block_size;
+    const int dim_1_index = (i % dim_123_block_size) / dim_23_block_size;
+    const int dim_2_index = (i % dim_23_block_size) / dim_3_block_size;
+    const int dim_3_index = i % dim_3_block_size;
+
 
     if (i >= dst_size) {
         return;
     }
+
+
+    if (dim_2_index < src0_dim2)
+    {
+        dst[i] = x[dim_0_index * x_123_block_size + dim_1_index * x_23_block_size + dim_2_index * dim_3_block_size + dim_3_index];
+    }
+    else{
+        const int dim_2_y_index = dim_2_index - src0_dim2;
+        dst[i] = y[dim_0_index * y_123_block_size + dim_1_index * y_23_block_size + dim_2_y_index * dim_3_block_size + dim_3_index];
+    }
+
+
+
+    /*
     if (i < src0_size)
     {
         dst[i] =  x[i];
     }
     else{
         dst[i] = y[i - src0_size];
-    }
+    }*/
 }
 
 
@@ -4633,7 +4666,13 @@ static void concat_f32_cuda(const float * x, const float * y, float * dst, const
     const int dst_size = src0_dim0 * src0_dim1 * combined_dim_2 * src0_dim3;
     const int src0_size = src0_dim0 * src0_dim1 * src0_dim2 * src0_dim3;
     const int num_blocks = (dst_size + CUDA_CONCAT_SIZE - 1) / CUDA_CONCAT_SIZE;
-    concat_f32<<<num_blocks, CUDA_CONCAT_SIZE, 0, stream>>>(x, y, dst, dst_size, src0_size, src0_dim0, src0_dim1, src0_dim2, src0_dim3);
+    std::cout << "dimensions" << std::endl;
+    std::cout << src0_dim0 << std::endl;
+    std::cout << src0_dim1 << std::endl;
+    std::cout << src0_dim2 << std::endl;
+    std::cout << src0_dim3 << std::endl;
+
+    concat_f32<<<num_blocks, CUDA_CONCAT_SIZE, 0, stream>>>(x, y, dst, dst_size, src0_size, src0_dim0, src0_dim1, src0_dim2, src0_dim3, combined_dim_2 - src0_dim2);
 }
 
 

@@ -14,6 +14,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <stdio.h>
 #include <time.h>
 #include <math.h>
 #include <stdlib.h>
@@ -6135,6 +6136,20 @@ struct ggml_tensor * ggml_concat(
     struct ggml_context* ctx,
     struct ggml_tensor* a,
     struct ggml_tensor* b) {
+
+    printf("concat dms\n");
+    printf("%d\n", a->ne[0]);
+    printf("%d\n", a->ne[1]);
+    printf("%d\n", a->ne[2]);
+    printf("%d\n", a->ne[3]);
+
+    printf("%d\n", b->ne[0]);
+    printf("%d\n", b->ne[1]);
+    printf("%d\n", b->ne[2]);
+    printf("%d\n", b->ne[3]);
+
+
+
     GGML_ASSERT(a->ne[0] == b->ne[0] && a->ne[1] == b->ne[1] && a->ne[3] == b->ne[3]);
 
     bool is_node = false;

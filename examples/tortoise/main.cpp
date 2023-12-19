@@ -343,7 +343,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*17 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*23 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -433,17 +433,33 @@ struct ggml_cgraph * autoregressive_graph(
 
     struct ggml_tensor * mel_position_embedding = ggml_get_rows(ctx0, model.mel_position_embedding_weights,mel_position);
 
+    //struct ggml_tensor * mel_position_embedding_1d = ggml_reshape_1d(ctx0, mel_position_embedding, 1024);
+
     mel_embedding = ggml_add(ctx0,mel_embedding, mel_position_embedding);
+ 
+ 
+    mel_embedding = ggml_reshape_4d(ctx0, mel_embedding, 1, 4, 1, 1024);
 
 
     struct ggml_tensor * output = ggml_concat(ctx0, reshaped_latent, reshaped_embedding);
+
+    struct ggml_tensor * repeated_output = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 4 * 17 * 1024); // todo do this more clearnly, going to rely on 1d copy for same of simplicity
+    output = ggml_reshape_1d(ctx0, output, 17*1024);
+
+    //output = ggml_concat(output, )
+
+    repeated_output =  ggml_repeat(ctx0, output, repeated_output);
+    repeated_output = ggml_reshape_4d(ctx0, repeated_output, 1,4,17,1024);
+
+    ggml_tensor * gpt2_input = ggml_concat(ctx0, repeated_output,mel_embedding);
+
 
 
 
 
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, mel_embedding);
+    ggml_build_forward_expand(gf, gpt2_input);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -546,8 +562,8 @@ int main(int argc, char ** argv) {
 
         //ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
         std::cout << "made it here" << std::endl;
-        std::vector<float> test_read(4 * 1024);
-        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float) * 4 * 1024);
+        std::vector<float> test_read(4 * 18 * 1024);
+        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 4* 18 * 1024);
         std::cout << "reached" << std::endl;
 
 
@@ -556,15 +572,18 @@ int main(int argc, char ** argv) {
        // {
        //     std::cout << entry << std::endl;
        // }
-        ggml_graph_print   (gf);
 
 
         //std::cout << test_read[0] << std::endl;
-        for (int i = 0; i < 4  * 1024 ; i++)
+        for (int i = 0; i < 4 * 18  * 1024 ; i++)
         {
+            if (i < 3 || i > 4 * 18 * 1024-4)
+            {
             std::cout << (test_read.data()[i])<< std::endl;
+            }
         }
 
+        ggml_graph_print   (gf);
 
 
         //std::cout << (float * )test->data << std::endl;
