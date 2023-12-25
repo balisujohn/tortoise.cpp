@@ -7,9 +7,9 @@ Voice latent is hardcoded for now.
 
 Text embedding/ text position embedding reconstruction complete with numbers matching.
 
-Mel embedding reconstruction in progress.
+Mel embedding reconstruction complete with numbers matching (at least for initial embedding).
 
-Autoregressive model(gpt-2) reconstruction pending.
+Autoregressive model(gpt-2) reconstruction in progress.
 
 Diffusion model reconstruction pending. 
 
@@ -30,6 +30,8 @@ From the build directory, run:
 ````
 ./bin/tortoise
 ````
+
+Note that the pre loaded ggml-model.bin saved in this repository does not have all the tensors currently loaded by the program, since the version with a lot of tensors is too big to put in version control. Feel free to make an issue asking for the conversion script if you want me to hurry up in posting it. 
 
 # Contributing
 If you want to contribute, please make an issue stating what you want to work on. I'll make a discord to manage contributors if there is a lot of interest. You can email me questions at \<mylastname\>u\<myfirstname\>@gmail.com. I am happy to help get people get started with contributing!
