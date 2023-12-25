@@ -44,6 +44,34 @@ struct autoregressive_hparams{
 };
 
 
+//derived from ggml gpt2 reference implementation
+struct gpt2_layer {
+    // normalization
+    struct ggml_tensor * linear_1_weights;
+    struct ggml_tensor * linear_1_bias;
+
+    struct ggml_tensor * linear_2_weights;
+    struct ggml_tensor * linear_2_bias;
+
+    // attention
+    struct ggml_tensor * c_attention_attention_weights;
+    struct ggml_tensor * c_attention_attention_bias;
+
+    struct ggml_tensor * c_attention_projection_weights;
+    struct ggml_tensor * c_attention_projection_bias;
+
+    // mlp
+    struct ggml_tensor * c_multi_layer_perceptron_fully_connected_weights;
+    struct ggml_tensor * c_multi_layer_perceptron_fully_connected_bias;
+
+    struct ggml_tensor * c_multi_layer_perceptron_projection_weights;
+    struct ggml_tensor * c_multi_layer_perceptron_projection_bias;
+
+};
+
+
+
+
 struct autoregressive_model{
     autoregressive_hparams hparams;
 
@@ -51,10 +79,7 @@ struct autoregressive_model{
 
     std::map<std::string, struct ggml_tensor *> tensors;
 
-    //struct ggml_tensor * init_conv_weights;
-    //struct ggml_tensor * init_conv_bias;
-
-
+ 
     struct ggml_tensor * conditioning_latent;
 
     struct ggml_tensor * text_embedding_weights;
@@ -63,6 +88,8 @@ struct autoregressive_model{
     struct ggml_tensor * mel_embedding_weights; 
     struct ggml_tensor * mel_position_embedding_weights;
     
+
+    std::vector<gpt2_layer> layers;
 
 
     struct ggml_context * ctx;
@@ -146,16 +173,39 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
     buffer_size += 1 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning latent
 
-    buffer_size +=  8194 * 1024 * ggml_type_sizef(GGML_TYPE_F32);// mel embedding weight 
+    buffer_size +=  8194 * 1024 * ggml_type_sizef(GGML_TYPE_F32);// mel embedding weight
 
     buffer_size += 608 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // mel position embedding weight
+
+    for (int i = 0 ; i < 1; i ++)
+    {
+        //todo fix this
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model linear 1 weight
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model linear 1 bias
+        
+        buffer_size += 1024 * 3072 * ggml_type_sizef(GGML_TYPE_F32); // inference model attention weight
+        buffer_size += 3072 * ggml_type_sizef(GGML_TYPE_F32); // inference model attention bias
+        
+        buffer_size += 1024 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model attention projection weight
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model attention projection bias
+    
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model linear 2 weight
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model linear 2 bias
+
+        buffer_size += 1024 * 4096 *  ggml_type_sizef(GGML_TYPE_F32); // inference model multi layer perceptron fully connected weight
+        buffer_size += 4096 * ggml_type_sizef(GGML_TYPE_F32); // inference model multi layer perceptron fully connected bais
+        
+        buffer_size += 4096 * 1024 *  ggml_type_sizef(GGML_TYPE_F32); // inference model multi layer perceptron projection weight
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model multi layer perceptron projection bais
+
+    }
 
 
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)5,
+            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(5 + 12),
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
@@ -212,6 +262,56 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         model.conditioning_latent = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,1);
         model.mel_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,8194);
         model.mel_position_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,608);
+
+        model.layers.resize(1);
+        for (int i= 0; i < 1; i ++)
+        {
+            auto & layer = model.layers[i];
+
+            layer.linear_1_weights = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.linear_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+
+            layer.c_attention_attention_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32,3072, 1024);
+            layer.c_attention_attention_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 3072);
+
+            layer.c_attention_projection_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32,1024, 1024);
+            layer.c_attention_projection_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+
+            layer.linear_2_weights = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.linear_2_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+
+            layer.c_multi_layer_perceptron_fully_connected_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32,4096, 1024);
+            layer.c_multi_layer_perceptron_fully_connected_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4096);
+
+
+            layer.c_multi_layer_perceptron_projection_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32,1024, 4096);
+            layer.c_multi_layer_perceptron_projection_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+
+
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_1.weight"] = layer.linear_1_weights;
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_1.bias"] = layer.linear_1_bias;
+
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".attn.c_attn.weight"] = layer.c_attention_attention_weights;
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".attn.c_attn.bias"] = layer.c_attention_attention_bias;
+
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".attn.c_proj.weight"] = layer.c_attention_projection_weights;
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".attn.c_proj.bias"] = layer.c_attention_projection_bias;
+
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_2.weight"] = layer.linear_2_weights;
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_2.bias"] = layer.linear_2_bias;
+
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".mlp.c_fc.weight"] = layer.c_multi_layer_perceptron_fully_connected_weights;
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".mlp.c_fc.bias"] = layer.c_multi_layer_perceptron_fully_connected_bias;
+
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".mlp.c_proj.weight"] = layer.c_multi_layer_perceptron_projection_weights;
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".mlp.c_proj.bias"] = layer.c_multi_layer_perceptron_projection_bias;
+
+
+
+        }
+
+
+
 
         //model.init_conv_bias = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1,1024);
 
@@ -274,6 +374,11 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
             auto tensor = model.tensors[name];
             ggml_set_name(tensor, name.c_str());
+
+            
+            std::cout << ggml_nelements(tensor) << std::endl;
+            std::cout <<nelements << std::endl;
+
             if (ggml_nelements(tensor) != nelements) {
                 fprintf(stderr, "%s: tensor '%s' has wrong size in model file\n", __func__, name.c_str());
                 return false;
@@ -343,7 +448,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*23 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*26 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -454,12 +559,27 @@ struct ggml_cgraph * autoregressive_graph(
     ggml_tensor * gpt2_input = ggml_concat(ctx0, repeated_output,mel_embedding);
 
 
+    struct ggml_tensor * cur = gpt2_input;
+
+
+    
+    for (int i = 0; i < 1; i++)
+    {
+
+            cur = ggml_norm(ctx0, cur, 1e-05);
+            ggml_format_name(cur, "l%d.norm", i);
+           // cur = ggml_mul_mat(ctx0, ggml_reshape_4d(ctx0,model.layers[0].linear_1_weights, 1,1,1,1024),cur);
+           // ggml_format_name(cur, "l%d.linear_1_bias", i);
+
+    }
+
+
 
 
 
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, gpt2_input);
+    ggml_build_forward_expand(gf, cur);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -557,6 +677,11 @@ int main(int argc, char ** argv) {
         std::cout << "reaced end" << std::endl;
 
         ggml_tensor * test = gf->nodes[gf->n_nodes - 1];
+        std::cout << test->ne[0]<< std::endl;
+        std::cout << test->ne[1]<< std::endl;
+        std::cout << test->ne[2]<< std::endl;
+        std::cout << test->ne[3]<< std::endl;
+
         //ggml_tensor * weights = gf->leafs[gf->n_leafs -2];
         //ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
 
