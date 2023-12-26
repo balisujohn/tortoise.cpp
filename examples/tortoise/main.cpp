@@ -448,7 +448,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*26 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*29 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -556,19 +556,43 @@ struct ggml_cgraph * autoregressive_graph(
     repeated_output =  ggml_repeat(ctx0, output, repeated_output);
     repeated_output = ggml_reshape_4d(ctx0, repeated_output, 1,4,17,1024);
 
+
+
     ggml_tensor * gpt2_input = ggml_concat(ctx0, repeated_output,mel_embedding);
 
+    //gpt2_input = ggml_transpose(ctx0, gpt2_input);
 
-    struct ggml_tensor * cur = gpt2_input;
+    /*ggml_tensor * norm_experiment = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32 , 1024);
+    ggml_allocr_alloc(allocr, norm_experiment);
+    if (!ggml_allocr_is_measure(allocr)) {
+//                    ggml_backend_tensor_set(fake_inputs, &start_mel_token, (token_count+1)*sizeof(int32_t), sizeof(start_mel_token));
+
+
+
+
+          for (int i = 0; i < 1024; i ++)
+          {
+            float v = 0;
+            ggml_backend_tensor_get(norm_experiment, gpt2_input->data, i * sizeof(GGML_TYPE_F32) , sizeof(GGML_TYPE_F32));
+            std::cout << i << std::endl;
+          }
+    
+    }
+    */
+
+    struct ggml_tensor * cur = ggml_reshape_4d(ctx0, gpt2_input, 1024,18,4,1);
 
 
     
     for (int i = 0; i < 1; i++)
     {
 
-            cur = ggml_norm(ctx0, cur, 1e-05);
+           cur = ggml_norm(ctx0, cur, 1e-05);
+
+           //cur = ggml_reshape_4d(ctx0, cur, 1024,18,4,1);
             ggml_format_name(cur, "l%d.norm", i);
-           // cur = ggml_mul_mat(ctx0, ggml_reshape_4d(ctx0,model.layers[0].linear_1_weights, 1,1,1,1024),cur);
+            cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.layers[0].linear_1_weights, cur),cur);
+            cur = ggml_add(ctx0,cur, model.layers[0].linear_1_bias);
            // ggml_format_name(cur, "l%d.linear_1_bias", i);
 
     }
@@ -702,7 +726,7 @@ int main(int argc, char ** argv) {
         //std::cout << test_read[0] << std::endl;
         for (int i = 0; i < 4 * 18  * 1024 ; i++)
         {
-            if (i < 3 || i > 4 * 18 * 1024-4)
+            if (i < 3 || i > 4 * 18 * 1024-4 || i == 1024 * 18)
             {
             std::cout << (test_read.data()[i])<< std::endl;
             }
