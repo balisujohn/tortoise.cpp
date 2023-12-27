@@ -35,3 +35,5 @@ zig-cache/
 *.sw?
 
 __pycache__/
+
+examples/tortoise/ggml-model.bin
