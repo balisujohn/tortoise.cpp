@@ -26,12 +26,14 @@ This is tested with Ubuntu 22.04 and cuda 12.0 and a 1070ti
 
 
 # Running
+You will need to place `ggml-model.bin` in the examples/tortoise.directory to run tortoise.cpp. You can generate the model yourself following the instructions in this tortoise-tts reverse engineering fork here https://github.com/balisujohn/tortoise-reverse-engineering, or download it here https://huggingface.co/balisujohn/tortoise-ggml.
+
+
 From the build directory, run:
 ````
 ./bin/tortoise
 ````
 
-Note that the pre loaded ggml-model.bin saved in this repository does not have all the tensors currently loaded by the program, since the version with a lot of tensors is too big to put in version control. Feel free to make an issue asking for the conversion script if you want me to hurry up in posting it. 
 
 # Contributing
 If you want to contribute, please make an issue stating what you want to work on. I'll make a discord to manage contributors if there is a lot of interest. You can email me questions at \<mylastname\>u\<myfirstname\>@gmail.com. I am happy to help get people get started with contributing!
