@@ -448,7 +448,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*29 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*35 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -560,40 +560,47 @@ struct ggml_cgraph * autoregressive_graph(
 
     ggml_tensor * gpt2_input = ggml_concat(ctx0, repeated_output,mel_embedding);
 
-    //gpt2_input = ggml_transpose(ctx0, gpt2_input);
 
-    /*ggml_tensor * norm_experiment = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32 , 1024);
-    ggml_allocr_alloc(allocr, norm_experiment);
-    if (!ggml_allocr_is_measure(allocr)) {
-//                    ggml_backend_tensor_set(fake_inputs, &start_mel_token, (token_count+1)*sizeof(int32_t), sizeof(start_mel_token));
-
-
-
-
-          for (int i = 0; i < 1024; i ++)
-          {
-            float v = 0;
-            ggml_backend_tensor_get(norm_experiment, gpt2_input->data, i * sizeof(GGML_TYPE_F32) , sizeof(GGML_TYPE_F32));
-            std::cout << i << std::endl;
-          }
-    
-    }
-    */
 
     struct ggml_tensor * cur = ggml_reshape_4d(ctx0, gpt2_input, 1024,18,4,1);
 
+
+    struct ggml_tensor * Qcur;
 
     
     for (int i = 0; i < 1; i++)
     {
 
+
+
+
+           //layer norm
+           
            cur = ggml_norm(ctx0, cur, 1e-05);
 
-           //cur = ggml_reshape_4d(ctx0, cur, 1024,18,4,1);
-            ggml_format_name(cur, "l%d.norm", i);
-            cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.layers[0].linear_1_weights, cur),cur);
-            cur = ggml_add(ctx0,cur, model.layers[0].linear_1_bias);
-           // ggml_format_name(cur, "l%d.linear_1_bias", i);
+           ggml_format_name(cur, "l%d.norm", i);
+           cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.layers[0].linear_1_weights, cur),cur);
+           cur = ggml_add(ctx0,cur, model.layers[0].linear_1_bias);
+
+
+      
+
+            // this is implemented as conv1d in pytorch, but it's actually just a affine transformation with
+            // a weight and bias
+            cur = ggml_mul_mat(ctx0,
+                        ggml_reshape_2d( ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,model.layers[i].c_attention_attention_weights)),1024,3072),
+                        cur);
+
+
+
+            cur = ggml_add(ctx0,
+                    ggml_repeat(ctx0, model.layers[i].c_attention_attention_bias, cur),
+                    cur);
+            
+
+            //Qcur = ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 0*sizeof(float)*1024 * 4);
+            //struct ggml_tensor * Kcur = ggml_view_2d(ctx0, cur, 1024, 18, cur->nb[1], 1*sizeof(float)*1024);
+            //struct ggml_tensor * Vcur = ggml_view_2d(ctx0, cur, 1024, 18, cur->nb[1], 2*sizeof(float)*1024);
 
     }
 
@@ -700,7 +707,7 @@ int main(int argc, char ** argv) {
 
         std::cout << "reaced end" << std::endl;
 
-        ggml_tensor * test = gf->nodes[gf->n_nodes - 1];
+        ggml_tensor * test = gf->nodes[gf->n_nodes-1];
         std::cout << test->ne[0]<< std::endl;
         std::cout << test->ne[1]<< std::endl;
         std::cout << test->ne[2]<< std::endl;
@@ -711,8 +718,8 @@ int main(int argc, char ** argv) {
 
         //ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
         std::cout << "made it here" << std::endl;
-        std::vector<float> test_read(4 * 18 * 1024);
-        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 4* 18 * 1024);
+        std::vector<float> test_read( 3072 * 18 * 4);
+        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 3072*18*4);
         std::cout << "reached" << std::endl;
 
 
@@ -724,13 +731,15 @@ int main(int argc, char ** argv) {
 
 
         //std::cout << test_read[0] << std::endl;
-        for (int i = 0; i < 4 * 18  * 1024 ; i++)
+        for (int i = 0; i < 3072 * 18*4 ; i++)
         {
-            if (i < 3 || i > 4 * 18 * 1024-4 || i == 1024 * 18)
+            if (i < 3 || i > 3072 * 18 * 4-4 || i ==  3072*18 )
             {
+            
             std::cout << (test_read.data()[i])<< std::endl;
             }
         }
+        
 
         ggml_graph_print   (gf);
 
