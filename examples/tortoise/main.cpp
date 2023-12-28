@@ -626,7 +626,6 @@ struct ggml_cgraph * autoregressive_graph(
 
 
 
-            //not matching yet
             //KQ = ggml_mul_mat(ctx0, ggml_permute(ctx0,K,0,1,2,3), ggml_permute(ctx0,Q,0,2,1,3));
             KQ = ggml_mul_mat(ctx0, K,Q);
 
