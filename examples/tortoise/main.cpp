@@ -448,7 +448,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*35 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*49 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -566,7 +566,13 @@ struct ggml_cgraph * autoregressive_graph(
 
 
     struct ggml_tensor * Qcur;
+    struct ggml_tensor * Kcur;
+    struct ggml_tensor * Vcur;
+    
+    struct ggml_tensor * Q;
+    struct ggml_tensor * K;
 
+    struct ggml_tensor * KQ;
     
     for (int i = 0; i < 1; i++)
     {
@@ -598,9 +604,32 @@ struct ggml_cgraph * autoregressive_graph(
                     cur);
             
 
-            //Qcur = ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 0*sizeof(float)*1024 * 4);
-            //struct ggml_tensor * Kcur = ggml_view_2d(ctx0, cur, 1024, 18, cur->nb[1], 1*sizeof(float)*1024);
-            //struct ggml_tensor * Vcur = ggml_view_2d(ctx0, cur, 1024, 18, cur->nb[1], 2*sizeof(float)*1024);
+
+
+            //derived from ggml reference gpt-2 implementation
+            Qcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 0));
+            Kcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 1024 * sizeof(float)));
+            Vcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 2048 * sizeof(float)));
+
+            //num heads 16
+            //head dim 64
+          
+            Q =ggml_permute(ctx0,
+                        ggml_reshape_4d(ctx0, Qcur , 64,16,18,4),
+                        0, 2, 1, 3);
+
+            // this is likely not general and but should work for the first layer, may need generalizing once we reach
+            //the end of the first layer.
+            K =ggml_permute(ctx0,
+                        ggml_reshape_4d(ctx0, Kcur , 64,16,18,4),
+                        0, 2, 1, 3);
+
+
+
+            //not matching yet
+            //KQ = ggml_mul_mat(ctx0, ggml_permute(ctx0,K,0,1,2,3), ggml_permute(ctx0,Q,0,2,1,3));
+            KQ = ggml_mul_mat(ctx0, K,Q);
+
 
     }
 
@@ -610,7 +639,7 @@ struct ggml_cgraph * autoregressive_graph(
 
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, cur);
+    ggml_build_forward_expand(gf, KQ);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -718,8 +747,8 @@ int main(int argc, char ** argv) {
 
         //ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
         std::cout << "made it here" << std::endl;
-        std::vector<float> test_read( 3072 * 18 * 4);
-        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 3072*18*4);
+        std::vector<float> test_read( 18 * 18 * 16* 4);
+        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 18*18*16*4);
         std::cout << "reached" << std::endl;
 
 
@@ -731,9 +760,9 @@ int main(int argc, char ** argv) {
 
 
         //std::cout << test_read[0] << std::endl;
-        for (int i = 0; i < 3072 * 18*4 ; i++)
+        for (int i = 0; i < 18*18*16*4 ; i++)
         {
-            if (i < 3 || i > 3072 * 18 * 4-4 || i ==  3072*18 )
+            if (i < 3 || i > 18*18*16*4-4 || i ==  1024*18 *4)
             {
             
             std::cout << (test_read.data()[i])<< std::endl;
