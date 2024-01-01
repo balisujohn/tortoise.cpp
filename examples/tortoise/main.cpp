@@ -448,7 +448,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*49 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*56 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -573,7 +573,13 @@ struct ggml_cgraph * autoregressive_graph(
     struct ggml_tensor * K;
 
     struct ggml_tensor * KQ;
-    
+    struct ggml_tensor * KQ_scaled;
+    struct ggml_tensor * KQ_masked;
+    struct ggml_tensor * KQ_soft_max;
+    struct ggml_tensor * V_transposed;
+    struct ggml_tensor * KQV;
+
+    struct ggml_tensor * test;
     for (int i = 0; i < 1; i++)
     {
 
@@ -625,9 +631,33 @@ struct ggml_cgraph * autoregressive_graph(
                         0, 2, 1, 3);
 
 
+            V_transposed = ggml_permute(ctx0,
+                        ggml_reshape_4d(ctx0, Vcur , 64,16,18,4),
+                        1,2,0,3);
 
-            //KQ = ggml_mul_mat(ctx0, ggml_permute(ctx0,K,0,1,2,3), ggml_permute(ctx0,Q,0,2,1,3));
+
+
             KQ = ggml_mul_mat(ctx0, K,Q);
+
+
+            
+            KQ_scaled = ggml_scale_inplace(ctx0, KQ, ggml_new_f32(ctx0,1.0f/sqrt(float(64))));
+
+
+            KQ_masked = ggml_diag_mask_inf_inplace(ctx0, KQ_scaled, 0);
+
+
+            KQ_soft_max =  ggml_soft_max_inplace(ctx0, KQ_masked);
+
+
+            //numbers approximately matching above this comment
+
+            test = ggml_cont_3d(ctx0,V_transposed, 18, 64, 64);
+            //test =ggml_mul_mat(ctx0,V_transposed, KQ_soft_max);
+
+
+           //KQV = ggml_mul_mat(ctx0,  ggml_cont(ctx0,ggml_reshape_3d(ctx0,V_transposed, 18, 64, 64)), ggml_cont(ctx0,ggml_reshape_3d(ctx0, KQ_soft_max, 18,18,64)));
+
 
 
     }
@@ -638,7 +668,7 @@ struct ggml_cgraph * autoregressive_graph(
 
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, KQ);
+    ggml_build_forward_expand(gf, test);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -660,8 +690,8 @@ int main(int argc, char ** argv) {
     
     std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
     //std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
-    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
     std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
 
 
     for (int i =0; i < tokens.size(); i ++)
