@@ -105,6 +105,21 @@ struct autoregressive_model{
 
 
 
+void save_f32_tensor(ggml_tensor * tensor, std::string path_name)
+{
+    std::ofstream stream;
+    stream.open( path_name, std::ios::out | std::ios::binary);
+
+    int elements = tensor->ne[0] * tensor->ne[1] * tensor->ne[2] * tensor->ne[3];
+
+    std::vector<float> data_read( elements);
+    ggml_backend_tensor_get(tensor,data_read.data(), 0 ,sizeof(float)* elements);
+    stream.write(reinterpret_cast<const char*>( data_read.data() ), elements * sizeof(float));
+    stream.close();
+}
+
+
+
 
 // derived from  gpt2_model_load(const std::string & fname, gpt2_model & model, gpt_vocab & vocab, int n_ctx, int n_gpu_layers) {
 bool autoregressive_model_load(const std::string & fname, autoregressive_model & model)
@@ -448,7 +463,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*56 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*68 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -609,11 +624,13 @@ struct ggml_cgraph * autoregressive_graph(
                     ggml_repeat(ctx0, model.layers[i].c_attention_attention_bias, cur),
                     cur);
             
-
+            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,cur->ne));
+            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,3,cur->ne));
 
 
             //derived from ggml reference gpt-2 implementation
             Qcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 0));
+           
             Kcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 1024 * sizeof(float)));
             Vcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 2048 * sizeof(float)));
 
@@ -623,7 +640,7 @@ struct ggml_cgraph * autoregressive_graph(
             Q =ggml_permute(ctx0,
                         ggml_reshape_4d(ctx0, Qcur , 64,16,18,4),
                         0, 2, 1, 3);
-
+            
             // this is likely not general and but should work for the first layer, may need generalizing once we reach
             //the end of the first layer.
             K =ggml_permute(ctx0,
@@ -635,11 +652,30 @@ struct ggml_cgraph * autoregressive_graph(
                         ggml_reshape_4d(ctx0, Vcur , 64,16,18,4),
                         1,2,0,3);
 
+            //casting to float16
+            //V_transposed = ggml_cont_3d(ctx0,ggml_view_1d(ctx0,V_transposed,18*64*64,0),18, 64, 64);
+            //V_transposed = ggml_reshape_4d(ctx0,ggml_cpy(ctx0, V_transposed, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,V_transposed->ne)),18,64,16,4);
 
+                    
+            //casting to float16
+         //   Q = ggml_cont_3d(ctx0,ggml_view_1d(ctx0,Q,64*18*64,0),64, 18, 64);
+          //  Q = ggml_reshape_4d(ctx0,ggml_cpy(ctx0, Q, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,Q->ne)),64,18,16,4);
+           // ggml_set_name(Q, "query");
+            //casting to float16
+          //  K = ggml_cont_3d(ctx0,ggml_view_1d(ctx0,K,64*18*64,0),64, 18, 64);
+          //  K = ggml_reshape_4d(ctx0,ggml_cpy(ctx0, K, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,K->ne)),64,18,16,4);
+          ///  ggml_set_name(K,"key");
+        
 
             KQ = ggml_mul_mat(ctx0, K,Q);
 
+            //KQ = ggml_reshape_1d(ctx0, KQ, KQ->ne[0]* KQ->ne[1]*KQ->ne[2]*KQ->ne[3]);
 
+            //KQ = ggml_cpy(ctx0, KQ, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,KQ->ne));
+            //KQ = ggml_cpy(ctx0, KQ, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,KQ->ne));
+
+            
+            
             
             KQ_scaled = ggml_scale_inplace(ctx0, KQ, ggml_new_f32(ctx0,1.0f/sqrt(float(64))));
 
@@ -648,15 +684,19 @@ struct ggml_cgraph * autoregressive_graph(
 
 
             KQ_soft_max =  ggml_soft_max_inplace(ctx0, KQ_masked);
+            
 
 
-            //numbers approximately matching above this comment
+            
+           KQV = ggml_mul_mat(ctx0, ggml_reshape_4d(ctx0,ggml_cont(ctx0,ggml_reshape_3d(ctx0, KQ_soft_max, 18,18,64)),18,18,16,4), V_transposed);
+      
 
-            test = ggml_cont_3d(ctx0,V_transposed, 18, 64, 64);
-            //test =ggml_mul_mat(ctx0,V_transposed, KQ_soft_max);
-
-
-           //KQV = ggml_mul_mat(ctx0,  ggml_cont(ctx0,ggml_reshape_3d(ctx0,V_transposed, 18, 64, 64)), ggml_cont(ctx0,ggml_reshape_3d(ctx0, KQ_soft_max, 18,18,64)));
+            
+            KQV = ggml_reshape_3d(ctx0, KQV, 18,64,64);
+            KQV = ggml_permute(ctx0, KQV, 1,0,2,3);
+            KQV = ggml_cont_3d(ctx0, KQV, 64,18,64);
+            KQV = ggml_reshape_4d(ctx0, KQV, 64,18,16,4);
+           
 
 
 
@@ -668,7 +708,7 @@ struct ggml_cgraph * autoregressive_graph(
 
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, test);
+    ggml_build_forward_expand(gf, KQV);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -764,40 +804,73 @@ int main(int argc, char ** argv) {
 
 
         std::cout << "reaced end" << std::endl;
-
-        ggml_tensor * test = gf->nodes[gf->n_nodes-1];
-        std::cout << test->ne[0]<< std::endl;
-        std::cout << test->ne[1]<< std::endl;
-        std::cout << test->ne[2]<< std::endl;
-        std::cout << test->ne[3]<< std::endl;
-
-        //ggml_tensor * weights = gf->leafs[gf->n_leafs -2];
-        //ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
-
-        //ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
-        std::cout << "made it here" << std::endl;
-        std::vector<float> test_read( 18 * 18 * 16* 4);
-        ggml_backend_tensor_get(test,test_read.data(), 0,sizeof(float)* 18*18*16*4);
-        std::cout << "reached" << std::endl;
-
-
-
-       // for (auto entry: test_read)
-       // {
-       //     std::cout << entry << std::endl;
-       // }
-
-
-        //std::cout << test_read[0] << std::endl;
-        for (int i = 0; i < 18*18*16*4 ; i++)
+        for (int i =0; i < gf->n_nodes; i ++)
         {
-            if (i < 3 || i > 18*18*16*4-4 || i ==  1024*18 *4)
+            std::cout << "---------------------------------------------------" << std::endl;
+            ggml_tensor * test = gf->nodes[i];
+            std::cout << "NAME:" << std::endl;
+            std::cout << test->name << std::endl;
+            std::cout << "TYPE" << std::endl;
+            std::cout <<  test->type << std::endl;
+            std::cout << "SHAPE:" << std::endl;
+            std::cout << test->ne[0]<< std::endl;
+            std::cout << test->ne[1]<< std::endl;
+            std::cout << test->ne[2]<< std::endl;
+            std::cout << test->ne[3]<< std::endl;
+            std::cout << "DATA:" << std::endl;
+
+
+            if (!ggml_is_contiguous(test))
             {
-            
-            std::cout << (test_read.data()[i])<< std::endl;
+                std::cout << "Skipped data; not contiguous" << std::endl;
+                continue;
             }
-        }
+            if (ggml_is_transposed(test))
+            {
+                std::cout << "Transposed:" << std::endl;
+
+            }
+
+            int elements = test->ne[0] * test->ne[1] * test->ne[2] * test->ne[3];
+
+            //ggml_tensor * weights = gf->leafs[gf->n_leafs -2];
+            //ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
+
+            //ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
+            //std::cout << "made it here" << std::endl;
+            if (test->type == GGML_TYPE_F32)
+            {
+            std::vector<float> test_read( elements);
+            ggml_backend_tensor_get(test,test_read.data(), 0 ,sizeof(float)* elements);
+//        
+            for (int c = 0; c < elements ; c++)
+            {
+                 
+                if  (c < 3 || c > elements-4 )
+                {
+               
+                std::cout << (test_read.data()[c])<< std::endl;
+                }
+            }
+            }
+            else if(test->type == GGML_TYPE_F16)
+            {
+             std::vector<ggml_fp16_t> test_read( elements);
+            ggml_backend_tensor_get(test,test_read.data(), 0 ,sizeof(ggml_fp16_t)* elements);
+//        
+            for (int c = 0; c < elements ; c++)
+            {
+                if  (c < 3 || c > elements-4)
+                {
+                
+                std::cout << ggml_fp16_to_fp32(test_read.data()[c])<< std::endl;
+                }
+            }
+            }
         
+        
+        
+        }
 
         ggml_graph_print   (gf);
 
