@@ -691,12 +691,19 @@ struct ggml_cgraph * autoregressive_graph(
            KQV = ggml_mul_mat(ctx0, ggml_reshape_4d(ctx0,ggml_cont(ctx0,ggml_reshape_3d(ctx0, KQ_soft_max, 18,18,64)),18,18,16,4), V_transposed);
       
 
-            
+            //getting the initial KQV value
             KQV = ggml_reshape_3d(ctx0, KQV, 18,64,64);
             KQV = ggml_permute(ctx0, KQV, 1,0,2,3);
             KQV = ggml_cont_3d(ctx0, KQV, 64,18,64);
             KQV = ggml_reshape_4d(ctx0, KQV, 64,18,16,4);
            
+
+           //"merge heads" operation
+           KQV = ggml_permute(ctx0, KQV, 0,2,1,3);
+           KQV = ggml_cont_3d(ctx0, KQV, 1024, 18, 4);
+
+
+
 
 
 
@@ -846,7 +853,7 @@ int main(int argc, char ** argv) {
             for (int c = 0; c < elements ; c++)
             {
                  
-                if  (c < 3 || c > elements-4 )
+                if  (c < 3 || c > elements-4  || c == 1024*18-1|| c == 1024*18-2|| c == 1024*18 || c == 1024*18+1 )
                 {
                
                 std::cout << (test_read.data()[c])<< std::endl;
