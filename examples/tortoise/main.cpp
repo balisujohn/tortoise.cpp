@@ -463,7 +463,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*68 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*95 + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -563,7 +563,7 @@ struct ggml_cgraph * autoregressive_graph(
 
     struct ggml_tensor * output = ggml_concat(ctx0, reshaped_latent, reshaped_embedding);
 
-    struct ggml_tensor * repeated_output = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 4 * 17 * 1024); // todo do this more clearnly, going to rely on 1d copy for same of simplicity
+    struct ggml_tensor * repeated_output = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 4 * 17 * 1024); // todo do this more cleanly, going to rely on 1d copy for same of simplicity
     output = ggml_reshape_1d(ctx0, output, 17*1024);
 
     //output = ggml_concat(output, )
@@ -593,13 +593,17 @@ struct ggml_cgraph * autoregressive_graph(
     struct ggml_tensor * KQ_soft_max;
     struct ggml_tensor * V_transposed;
     struct ggml_tensor * KQV;
+    struct ggml_tensor * KQV_merged;
+
+    struct ggml_tensor * residual;
+    struct ggml_tensor * feed_forward_residual;
 
     struct ggml_tensor * test;
     for (int i = 0; i < 1; i++)
     {
 
 
-
+           residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
            //layer norm
            
@@ -691,20 +695,69 @@ struct ggml_cgraph * autoregressive_graph(
            KQV = ggml_mul_mat(ctx0, ggml_reshape_4d(ctx0,ggml_cont(ctx0,ggml_reshape_3d(ctx0, KQ_soft_max, 18,18,64)),18,18,16,4), V_transposed);
       
 
-            //getting the initial KQV value
-            KQV = ggml_reshape_3d(ctx0, KQV, 18,64,64);
-            KQV = ggml_permute(ctx0, KQV, 1,0,2,3);
-            KQV = ggml_cont_3d(ctx0, KQV, 64,18,64);
-            KQV = ggml_reshape_4d(ctx0, KQV, 64,18,16,4);
+           //getting the initial KQV value
+           KQV = ggml_reshape_3d(ctx0, KQV, 18,64,64);
+           KQV = ggml_permute(ctx0, KQV, 1,0,2,3);
+           KQV = ggml_cont_3d(ctx0, KQV, 64,18,64);
+           KQV = ggml_reshape_4d(ctx0, KQV, 64,18,16,4);
            
 
            //"merge heads" operation
-           KQV = ggml_permute(ctx0, KQV, 0,2,1,3);
-           KQV = ggml_cont_3d(ctx0, KQV, 1024, 18, 4);
+           KQV_merged = ggml_permute(ctx0, KQV, 0,2,1,3);
+           KQV_merged = ggml_cont_3d(ctx0, KQV_merged, 1024, 18, 4);
+
+            cur = ggml_mul_mat(ctx0,
+                        ggml_reshape_2d( ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,model.layers[i].c_attention_projection_weights)),1024,1024),
+                        KQV_merged);
 
 
 
+            cur = ggml_add(ctx0,
+                    ggml_repeat(ctx0, model.layers[i].c_attention_projection_bias, cur),
+                    cur);
 
+            //layer input passthrough
+            cur = ggml_add(ctx0, cur, residual);
+
+            feed_forward_residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+
+            //layer norm 2
+            cur = ggml_norm(ctx0, cur, 1e-05);
+
+            ggml_format_name(cur, "l%d.norm_2", i);
+            cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.layers[0].linear_2_weights, cur),cur);
+            cur = ggml_add(ctx0,cur, model.layers[0].linear_2_bias);
+
+
+
+            //  fully connected multi layer perceptron
+            cur = ggml_mul_mat(ctx0,
+                        ggml_reshape_2d( ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,model.layers[i].c_multi_layer_perceptron_fully_connected_weights)),1024,4096),
+                        cur);
+
+
+
+            cur = ggml_add(ctx0,
+                    ggml_repeat(ctx0, model.layers[i].c_multi_layer_perceptron_fully_connected_bias, cur),
+                    cur);
+
+
+            cur = ggml_gelu(ctx0, cur);
+
+
+            cur = ggml_mul_mat(ctx0,
+                        ggml_reshape_2d( ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,model.layers[i].c_multi_layer_perceptron_projection_weights)),4096,1024),
+                        cur);
+
+
+            cur = ggml_add(ctx0,
+                    ggml_repeat(ctx0, model.layers[i].c_multi_layer_perceptron_projection_bias, cur),
+                    cur);
+
+
+            cur = ggml_add(ctx0, cur, feed_forward_residual);
 
 
     }
@@ -715,7 +768,7 @@ struct ggml_cgraph * autoregressive_graph(
 
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, KQV);
+    ggml_build_forward_expand(gf, cur);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -853,7 +906,7 @@ int main(int argc, char ** argv) {
             for (int c = 0; c < elements ; c++)
             {
                  
-                if  (c < 3 || c > elements-4  || c == 1024*18-1|| c == 1024*18-2|| c == 1024*18 || c == 1024*18+1 )
+                if  (c < 3 || c > elements-4  || c == 1024*18-1|| c == 1024*18-2|| c == 1024*18 || c == 1024*18+2 )
                 {
                
                 std::cout << (test_read.data()[c])<< std::endl;
