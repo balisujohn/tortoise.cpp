@@ -192,7 +192,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
     buffer_size += 608 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // mel position embedding weight
 
-    for (int i = 0 ; i < 1; i ++)
+    for (int i = 0 ; i < 30; i ++)
     {
         //todo fix this
         buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model linear 1 weight
@@ -214,13 +214,13 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model multi layer perceptron projection bais
 
     }
-
+    
 
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(5 + 12),
+            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(5 + 12*30),
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
@@ -279,7 +279,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         model.mel_position_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,608);
 
         model.layers.resize(1);
-        for (int i= 0; i < 1; i ++)
+        for (int i= 0; i < 30; i ++)
         {
             auto & layer = model.layers[i];
 
@@ -463,7 +463,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*95 + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*(25 +70*31)  + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -599,23 +599,24 @@ struct ggml_cgraph * autoregressive_graph(
     struct ggml_tensor * feed_forward_residual;
 
     struct ggml_tensor * test;
-    for (int i = 0; i < 1; i++)
+    for (int i = 0; i < 30; i++)
     {
 
 
            residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
+           
            //layer norm
            
            cur = ggml_norm(ctx0, cur, 1e-05);
 
            ggml_format_name(cur, "l%d.norm", i);
-           cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.layers[0].linear_1_weights, cur),cur);
-           cur = ggml_add(ctx0,cur, model.layers[0].linear_1_bias);
+           cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.layers[i].linear_1_weights, cur),cur);
+           cur = ggml_add(ctx0,cur, model.layers[i].linear_1_bias);
 
 
       
 
+          
             // this is implemented as conv1d in pytorch, but it's actually just a affine transformation with
             // a weight and bias
             cur = ggml_mul_mat(ctx0,
@@ -628,8 +629,13 @@ struct ggml_cgraph * autoregressive_graph(
                     ggml_repeat(ctx0, model.layers[i].c_attention_attention_bias, cur),
                     cur);
             
+            
             cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,cur->ne));
             cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,3,cur->ne));
+
+
+
+          
 
 
             //derived from ggml reference gpt-2 implementation
@@ -727,8 +733,8 @@ struct ggml_cgraph * autoregressive_graph(
             cur = ggml_norm(ctx0, cur, 1e-05);
 
             ggml_format_name(cur, "l%d.norm_2", i);
-            cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.layers[0].linear_2_weights, cur),cur);
-            cur = ggml_add(ctx0,cur, model.layers[0].linear_2_bias);
+            cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.layers[i].linear_2_weights, cur),cur);
+            cur = ggml_add(ctx0,cur, model.layers[i].linear_2_bias);
 
 
 
