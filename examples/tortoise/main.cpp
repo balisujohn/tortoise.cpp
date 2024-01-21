@@ -46,7 +46,7 @@ struct autoregressive_hparams{
 
 //derived from ggml gpt2 reference implementation
 struct gpt2_layer {
-    // normalization
+    // layer norm 1 and 2, accidentally named incorrectly
     struct ggml_tensor * linear_1_weights;
     struct ggml_tensor * linear_1_bias;
 
@@ -87,6 +87,10 @@ struct autoregressive_model{
 
     struct ggml_tensor * mel_embedding_weights; 
     struct ggml_tensor * mel_position_embedding_weights;
+
+    struct ggml_tensor * final_layer_norm_weights;
+    struct ggml_tensor * final_layer_norm_bias;
+
     
 
     std::vector<gpt2_layer> layers;
@@ -216,11 +220,16 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
     }
     
 
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // final layer norm weight
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // final layer norm bias
+
+
+
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(5 + 12*30),
+            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(5 + 12*30 + 2),
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
@@ -277,6 +286,8 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         model.conditioning_latent = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,1);
         model.mel_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,8194);
         model.mel_position_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,608);
+        model.final_layer_norm_weights = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+        model.final_layer_norm_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
 
         model.layers.resize(1);
         for (int i= 0; i < 30; i ++)
@@ -325,7 +336,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
         }
 
-
+        
 
 
         //model.init_conv_bias = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1,1024);
@@ -335,7 +346,8 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         //model.tensors["conditioning_encoder.init.bias"] = model.init_conv_bias;
         //model.tensors["conditioning_encoder.init.weight"] = model.init_conv_weights;
 
-
+        model.tensors["inference_model.transformer.ln_f.weight"] = model.final_layer_norm_weights;
+        model.tensors["inference_model.transformer.ln_f.bias"] = model.final_layer_norm_bias;
         model.tensors["text_embedding.weight"] = model.text_embedding_weights;
         model.tensors["text_pos_embedding.emb.weight"] = model.text_position_embedding_weights;
         model.tensors["conditioning_latent"] = model.conditioning_latent;
@@ -768,6 +780,10 @@ struct ggml_cgraph * autoregressive_graph(
 
     }
 
+    cur = ggml_norm(ctx0, cur, 1e-05);
+
+    cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.final_layer_norm_weights, cur),cur);
+    cur = ggml_add(ctx0,cur, model.final_layer_norm_bias);
 
 
 
@@ -938,7 +954,7 @@ int main(int argc, char ** argv) {
         
         }
 
-        ggml_graph_print   (gf);
+        //ggml_graph_print   (gf);
 
 
         //std::cout << (float * )test->data << std::endl;
