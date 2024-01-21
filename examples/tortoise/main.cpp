@@ -91,6 +91,12 @@ struct autoregressive_model{
     struct ggml_tensor * final_layer_norm_weights;
     struct ggml_tensor * final_layer_norm_bias;
 
+    struct ggml_tensor * language_model_head_layer_norm_weights;
+    struct ggml_tensor * language_model_head_layer_norm_bias;
+
+    struct ggml_tensor * language_model_head_linear_weights;
+    struct ggml_tensor * language_model_head_linear_bias;
+
     
 
     std::vector<gpt2_layer> layers;
@@ -223,13 +229,20 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
     buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // final layer norm weight
     buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // final layer norm bias
 
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // language model head layer norm weight
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // language model head layer norm bias
+
+    buffer_size += 1024 * 8194  * ggml_type_sizef(GGML_TYPE_F32); // language model head linear weight
+    buffer_size += 8194 * ggml_type_sizef(GGML_TYPE_F32); // language model head linear bias
+
+    buffer_size += 128; // ???
 
 
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(5 + 12*30 + 2),
+            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(5 + 12*30 + 6),
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
@@ -288,6 +301,11 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         model.mel_position_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,608);
         model.final_layer_norm_weights = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
         model.final_layer_norm_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+        model.language_model_head_layer_norm_weights = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+        model.language_model_head_layer_norm_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+        model.language_model_head_linear_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,8194);
+        model.language_model_head_linear_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 8194);
+
 
         model.layers.resize(1);
         for (int i= 0; i < 30; i ++)
@@ -345,6 +363,11 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         
         //model.tensors["conditioning_encoder.init.bias"] = model.init_conv_bias;
         //model.tensors["conditioning_encoder.init.weight"] = model.init_conv_weights;
+        model.tensors["inference_model.lm_head.0.weight"] = model.language_model_head_layer_norm_weights;
+        model.tensors["inference_model.lm_head.0.bias"] = model.language_model_head_layer_norm_bias;
+
+        model.tensors["inference_model.lm_head.1.weight"] = model.language_model_head_linear_weights;
+        model.tensors["inference_model.lm_head.1.bias"] = model.language_model_head_linear_bias;
 
         model.tensors["inference_model.transformer.ln_f.weight"] = model.final_layer_norm_weights;
         model.tensors["inference_model.transformer.ln_f.bias"] = model.final_layer_norm_bias;
@@ -475,7 +498,7 @@ struct ggml_cgraph * autoregressive_graph(
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*(25 +70*31)  + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*(25 +70*32)  + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -786,8 +809,22 @@ struct ggml_cgraph * autoregressive_graph(
     cur = ggml_add(ctx0,cur, model.final_layer_norm_bias);
 
 
+    cur = ggml_norm(ctx0, cur, 1e-05);
+
+    cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.language_model_head_layer_norm_weights, cur),cur);
+    cur = ggml_add(ctx0,cur, model.language_model_head_layer_norm_bias);
+    
+    cur = ggml_mul_mat(ctx0,
+                        model.language_model_head_linear_weights,
+                        cur);
 
 
+
+    cur = ggml_add(ctx0,
+            ggml_repeat(ctx0, model.language_model_head_linear_bias, cur),
+            cur);
+    
+    
     std::cout << "didn't reach here" << std::endl;
 
     ggml_build_forward_expand(gf, cur);
