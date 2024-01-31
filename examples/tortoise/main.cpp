@@ -823,11 +823,14 @@ struct ggml_cgraph * autoregressive_graph(
     cur = ggml_add(ctx0,
             ggml_repeat(ctx0, model.language_model_head_linear_bias, cur),
             cur);
+
+    
+    ggml_tensor * next_token_logits = ggml_cont(ctx0,ggml_view_4d(ctx0, cur, 8194, 1, 4, 1, cur->nb[1], cur->nb[2], cur->nb[3], 17 * sizeof(float) * 8194 ));
     
     
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, cur);
+    ggml_build_forward_expand(gf, next_token_logits);
 
     std::cout << "reached end graph build" << std::endl;
 
