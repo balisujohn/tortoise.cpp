@@ -826,11 +826,17 @@ struct ggml_cgraph * autoregressive_graph(
 
     
     ggml_tensor * next_token_logits = ggml_cont(ctx0,ggml_view_4d(ctx0, cur, 8194, 1, 4, 1, cur->nb[1], cur->nb[2], cur->nb[3], 17 * sizeof(float) * 8194 ));
+
+    next_token_logits = ggml_reshape_4d(ctx0, next_token_logits, 8194, 4, 1,1);
+
+    mel_transformer_inputs = ggml_reshape_4d(ctx0, mel_transformer_inputs, 18, 4, 1, 1);
+
+    ggml_tensor * score = ggml_gather(ctx0, next_token_logits, mel_transformer_inputs, 1);
     
     
     std::cout << "didn't reach here" << std::endl;
 
-    ggml_build_forward_expand(gf, next_token_logits);
+    ggml_build_forward_expand(gf, score);
 
     std::cout << "reached end graph build" << std::endl;
 
@@ -968,7 +974,7 @@ int main(int argc, char ** argv) {
             for (int c = 0; c < elements ; c++)
             {
                  
-                if  (c < 3 || c > elements-4  || c == 1024*18-1|| c == 1024*18-2|| c == 1024*18 || c == 1024*18+2 )
+                if  (c < 3 || c > elements-4  || c == 1024*18-1|| c == 1024*18-2|| c == 1024*18 || c == 1024*18+2  || c == 17)
                 {
                
                 std::cout << (test_read.data()[c])<< std::endl;
@@ -988,13 +994,27 @@ int main(int argc, char ** argv) {
                 std::cout << ggml_fp16_to_fp32(test_read.data()[c])<< std::endl;
                 }
             }
+            } 
+            else if(test->type == GGML_TYPE_I32){
+            std::vector<int32_t> test_read( elements);
+            ggml_backend_tensor_get(test,test_read.data(), 0 ,sizeof(int32_t)* elements);
+//        
+            for (int c = 0; c < elements ; c++)
+            {
+                if  (c < 3 || c > elements-4)
+                {
+                
+                std::cout << test_read.data()[c]<< std::endl;
+                }
             }
+            }
+            
         
         
         
         }
 
-        //ggml_graph_print   (gf);
+       // ggml_graph_print   (gf);
 
 
         //std::cout << (float * )test->data << std::endl;

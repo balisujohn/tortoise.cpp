@@ -4027,6 +4027,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "REPEAT",
     "REPEAT_BACK",
     "CONCAT",
+    "GATHER",
     "SILU_BACK",
     "NORM",
     "RMS_NORM",
@@ -4092,7 +4093,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "CROSS_ENTROPY_LOSS_BACK",
 };
 
-static_assert(GGML_OP_COUNT == 73, "GGML_OP_COUNT != 73");
+static_assert(GGML_OP_COUNT == 74, "GGML_OP_COUNT != 74");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -4114,6 +4115,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "repeat(x)",
     "repeat_back(x)",
     "concat(x, y)",
+    "gather(x, y)",
     "silu_back(x)",
     "norm(x)",
     "rms_norm(x)",
@@ -4179,7 +4181,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "cross_entropy_loss_back(x,y)",
 };
 
-static_assert(GGML_OP_COUNT == 73, "GGML_OP_COUNT != 73");
+static_assert(GGML_OP_COUNT == 74, "GGML_OP_COUNT != 74");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -7162,6 +7164,31 @@ struct ggml_tensor * ggml_get_rows_back(
     result->src[1] = b;
 
     return result;
+}
+
+
+struct ggml_tensor * ggml_gather(
+            struct ggml_context * ctx,
+            struct ggml_tensor * a,
+            struct ggml_tensor * index, 
+            int dim
+){
+
+    bool is_node = false;
+
+    if (a->grad) {
+        is_node = true;
+    }
+
+    struct ggml_tensor * result = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, index->ne[0], index->ne[1], index->ne[2], index->ne[3]);
+
+    result->op = GGML_OP_GATHER;
+    result->grad = is_node ? ggml_dup_tensor(ctx, result) : NULL;
+    result->src[0] = a;
+    result->src[1] = index;
+
+    return result;
+
 }
 
 // ggml_diag
@@ -16948,6 +16975,10 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
             {
                 ggml_compute_forward_concat(params, tensor->src[0], tensor->src[1], tensor);
             } break;
+        case GGML_OP_GATHER:
+        {
+            GGML_ASSERT(false);// not implemented for CPU 
+        } break;
         case GGML_OP_SILU_BACK:
             {
                 ggml_compute_forward_silu_back(params, tensor->src[0], tensor->src[1], tensor);
@@ -18768,6 +18799,7 @@ struct ggml_cplan ggml_graph_plan(struct ggml_cgraph * cgraph, int n_threads) {
                     n_tasks = n_threads;
                 } break;
             case GGML_OP_CONCAT:
+            case GGML_OP_GATHER:
             case GGML_OP_MUL_MAT:
                 {
                     n_tasks = n_threads;

@@ -490,6 +490,21 @@ static __global__ void add_f32(const float * x, const float * y, float * dst, co
     dst[i] = x[i] + y[i%ky];
 }
 
+
+static __global__ void gather_f32(const float * x, const int32_t * y, float * dst, const int kx, const int ky,
+const int ne00, const int ne01, const int ne10, const int ne11) {
+    const int i = blockDim.x*blockIdx.x + threadIdx.x;
+    
+    const int rowIndex = i / ne10;
+    //const int colIndex = i & ne10;
+    const int colIndex = y[i];
+
+    if (i >= ky) {
+        return;
+    }
+    dst[i] = x[rowIndex * ne00 + colIndex];
+}
+
 static __global__ void concat_f32(const float * x, const float * y, float * dst, const int dst_size, const int src0_size, const int src0_dim0,const int src0_dim1,const int src0_dim2,const int src0_dim3, const int src1_dim2) {
     const int i = blockDim.x*blockIdx.x + threadIdx.x;
 
@@ -4679,6 +4694,11 @@ static void add_f32_cuda(const float * x, const float * y, float * dst, const in
     add_f32<<<num_blocks, CUDA_ADD_BLOCK_SIZE, 0, stream>>>(x, y, dst, kx, ky);
 }
 
+static void gather_cuda(const float * x, const int32_t * y, float * dst, const int kx, const int ky, const int ne00, const int ne01, const int ne10, const int ne11, cudaStream_t stream) {
+    const int num_blocks = (ky + CUDA_ADD_BLOCK_SIZE - 1) / CUDA_ADD_BLOCK_SIZE;
+    gather_f32<<<num_blocks, CUDA_ADD_BLOCK_SIZE, 0, stream>>>(x, y, dst, kx, ky, ne00,ne01, ne10,ne11);
+}
+
 
 static void concat_f32_cuda(const float * x, const float * y, float * dst, const int src0_dim0,const int src0_dim1,const int src0_dim2,const int src0_dim3, const int combined_dim_2, cudaStream_t stream) {
     const int dst_size = src0_dim0 * src0_dim1 * combined_dim_2 * src0_dim3;
@@ -6053,6 +6073,45 @@ inline void ggml_cuda_op_add(
     } else {
         GGML_ASSERT(false);
     }
+
+    (void) src1;
+    (void) dst;
+}
+
+
+inline void ggml_cuda_op_gather(
+    const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst,
+    const float * src0_dd, const float * src1_dd, float * dst_dd, const cudaStream_t & main_stream) {
+
+    GGML_ASSERT(src1->type == GGML_TYPE_I32);
+    GGML_ASSERT(src0->type == GGML_TYPE_F32);
+    GGML_ASSERT(dst->type == GGML_TYPE_F32);
+
+    GGML_ASSERT(src1->ne[0] == dst->ne[0]);
+    GGML_ASSERT(src1->ne[1] == dst->ne[1]);
+    GGML_ASSERT(src1->ne[2] == dst->ne[2]);
+    GGML_ASSERT(src1->ne[3] == dst->ne[3]);
+
+   
+    GGML_ASSERT(src1->ne[1] == src0->ne[1]); // need to have the same number of rows
+
+
+    GGML_ASSERT(src1->ne[2] == 1); // only set up for 2d tensors
+    GGML_ASSERT(src1->ne[3] == 1);
+
+
+    GGML_ASSERT(src0->ne[2] == 1);
+    GGML_ASSERT(src0->ne[3] == 1);
+
+
+
+    const int64_t ne10 = src1->ne[0];
+    const int64_t ne11 = src1->ne[1];
+
+    const int32_t * src1_i32_dd = (const int32_t *) src1_dd;
+
+
+    gather_cuda(src0_dd, src1_i32_dd, dst_dd, ggml_nelements(src0), ggml_nelements(src1),src0->ne[0], src0->ne[1], src1->ne[0], src1->ne[1],  main_stream);
 
     (void) src1;
     (void) dst;
@@ -7471,9 +7530,17 @@ static void ggml_cuda_cpy(const ggml_tensor * src0, const ggml_tensor * src1, gg
     (void) dst;
 }
 
+
+
+
+
 static void ggml_cuda_dup(const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
     ggml_cuda_cpy(src0, dst, nullptr);
     (void) src1;
+}
+
+static void ggml_cuda_gather(const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
+    ggml_cuda_op_flatten(src0, src1, dst, ggml_cuda_op_gather);
 }
 
 static void ggml_cuda_diag_mask_inf(const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
@@ -7794,6 +7861,9 @@ bool ggml_cuda_compute_forward(struct ggml_compute_params * params, struct ggml_
             break;
         case GGML_OP_CONCAT:
             func = ggml_cuda_concat;
+            break;
+        case GGML_OP_GATHER:
+            func = ggml_cuda_gather;
             break;
         case GGML_OP_GET_ROWS:
             func = ggml_cuda_get_rows;

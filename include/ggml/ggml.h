@@ -372,6 +372,7 @@ extern "C" {
         GGML_OP_REPEAT,
         GGML_OP_REPEAT_BACK,
         GGML_OP_CONCAT,
+        GGML_OP_GATHER, 
         GGML_OP_SILU_BACK,
         GGML_OP_NORM, // normalize
         GGML_OP_RMS_NORM,
@@ -1246,6 +1247,13 @@ extern "C" {
             struct ggml_tensor  * a,
             struct ggml_tensor  * b,
             struct ggml_tensor  * c);
+
+    GGML_API struct ggml_tensor * ggml_gather(
+            struct ggml_context * ctx,
+            struct ggml_tensor * a,
+            struct ggml_tensor * index, 
+            int dim
+    );
 
     GGML_API struct ggml_tensor * ggml_diag(
         struct ggml_context     * ctx,
