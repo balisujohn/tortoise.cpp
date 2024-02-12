@@ -19,9 +19,12 @@
 #include <cstring>
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
+#include <random>
+#include <functional>
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -29,6 +32,10 @@
 
 
 int32_t NUM_RETURN_SEQUENCES = 4; //hardcoding this for now, analagous to "num_return_sequences arugment to inference_speech"
+
+std::mt19937 generator(245645656);
+std::uniform_real_distribution<float> distribution(0.0, 1.0);
+
 
 
 struct autoregressive_hparams{
@@ -885,6 +892,15 @@ void printVector(std::vector<T> vector, int n, std::string name) {
     std::cout << std::endl;
 }
 
+void printValuesAboveThreshold(const std::vector<float>& vec, float threshold) {
+    std::cout << "REACHED 6 " << std::endl;
+    for (size_t i = 0; i < vec.size(); ++i) {
+        if (vec[i] > threshold) {
+            std::cout << "Index: " << i << ", Value: " << vec[i] << std::endl;
+        }
+    }
+}
+
 std::vector<float> apply_penalty(const std::vector<float> score, float penalty) {
     std::vector<float> result(score.size());
     for (size_t i = 0; i < score.size(); ++i) {
@@ -951,10 +967,122 @@ void temp_inplace(std::vector<float> &src, float temp)
 {
     for(int i = 0; i < src.size(); i++)
     {
-        src[i] *= temp;
+        src[i] /= temp;
     }
 }
 
+void val_where_below_thresh(std::vector<float> & src, float threshold, float val)
+{
+    for (int i = 0; i < src.size(); i++)
+    {
+        if (src[i] < threshold)
+            src[i] = val;
+    }
+}
+
+
+
+
+
+float nth_largest(std::vector<float> src, int n)
+{
+    std::sort(src.begin(), src.end());
+    return src[src.size() - n];
+}
+
+void top_k_inplace(std::vector<float> & src, int k)
+{
+    k = std::min(k, 8194);
+    float kth_largest_val = nth_largest(src, k);
+    val_where_below_thresh(src, kth_largest_val, std::numeric_limits<float>::lowest());
+}
+
+void softmax_inplace(std::vector<float> & src)
+{
+    assert(src.size() == 8194);
+    float sum = 0;
+    for (int i =0; i < src.size();i++)
+    {
+            assert(src.size() == 8194);
+
+         src[i] = exp(src[i]);
+         sum += src[i];
+    }
+    for (int j =0; j < src.size();j++)
+    {
+        assert(src.size() == 8194);
+         src[j] /= sum;
+
+    }
+}
+
+
+void top_p_inplace(std::vector<float > & src){
+
+    std::vector<std::pair<float, int>>  src_pairs;
+    for(int i = 0; i < src.size(); i++){
+        src_pairs.push_back(std::make_pair( src[i], i));
+    }
+
+
+    std::vector<float> sorted_logits;
+    std::vector<int> sorted_indices;
+
+
+    std::sort(src_pairs.begin(), src_pairs.end(), [](const std::pair<float, int>& a, const std::pair<float, int>& b) {
+        return a.first < b.first;
+    });
+
+
+
+    for (const auto& pair : src_pairs) {
+        sorted_logits.push_back(pair.first);
+        sorted_indices.push_back(pair.second);
+    }
+
+
+
+
+    // next we perform softmax on the vector of floats sorted_logits
+    assert(sorted_logits.size() == 8194);
+    softmax_inplace(sorted_logits);
+    //next we perform an in place cumulative sum operation on sorted logits
+
+    for(int i = 1; i < sorted_logits.size(); i++)
+    {
+        sorted_logits[i] += sorted_logits[i-1];
+    }
+
+
+    for (int i = 0; i < src.size()-1; i ++) // this -1 is because for some reason the last token is never zeroed out.
+    {
+        if (sorted_logits[i] <= 0.2){
+        src[src_pairs[i].second]  = std::numeric_limits<float>::lowest();
+        }
+    }
+
+
+}
+
+
+int multinomial( std::vector<float> probs) // worth chaning to a binary search at some point, but for now done the simple way
+{
+
+    float sample = distribution(generator);
+    sample = distribution(generator);
+
+    float cumulative_probability = 0;
+    for (int i = 0; i < probs.size(); i++)
+    {
+        cumulative_probability += probs[i];
+        if (cumulative_probability >= sample)
+        {
+            return i;
+        }
+    }
+    return 8194 - 1; // not supposed to be reached, but defaults to the last probability
+
+}
 
 
 
@@ -964,6 +1092,18 @@ int main(int argc, char ** argv) {
     std::cout << "hello world" << std::endl;
     
 
+    
+    //std::uniform_real_distribution<float> distribution(0.0, 1.0);
+    /*
+    std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+        std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+    */
     gpt_vocab vocab;
     gpt_vocab_init("../examples/tortoise/tokenizer.json", vocab);
     
@@ -1009,6 +1149,7 @@ int main(int argc, char ** argv) {
     std::cout << "completed" << std::endl;
     
 
+
     std::vector<int> mel_transformer_inputs_vector = std::vector<int>();
     mel_transformer_inputs_vector.resize((tokens.size() + 2) * 4);
     assert(tokens.size() == 16);
@@ -1033,6 +1174,7 @@ int main(int argc, char ** argv) {
          // alignment required by the backend
         size_t align = ggml_backend_get_alignment(model.backend);
         std::cout << "alignment" << std::endl;
+        std::cout << align << std::endl;
         allocr = ggml_allocr_new_measure(align);
         std::cout << "align created" << std::endl;
 
@@ -1095,7 +1237,37 @@ int main(int argc, char ** argv) {
         gather_result = apply_penalty(gather_result, 2.0);
         std::cout << "BEGIN" << std::endl;
         std::vector<float> transformed_mel_transformer_inputs_vector = scatter(next_token_logits_vector, gather_result, mel_transformer_inputs_vector);
-       
+        
+        std::cout << transformed_mel_transformer_inputs_vector.size() << std::endl;
+        std::vector<int> samples(4); // batch size is 4
+
+
+        std::vector<float> probs(transformed_mel_transformer_inputs_vector.size());
+        for(int i = 0; i < 4; i ++) // hardcoded to batch size of 4
+        {
+
+            std::vector<float> logits;
+            logits.insert(logits.end(), transformed_mel_transformer_inputs_vector.begin() + (i * 8194), transformed_mel_transformer_inputs_vector.begin() + ((i+1)*8194));
+            assert(logits.size() == 8194);
+            //transformed_mel_transformer_inputs_vector.resize(8194); // just considering 1 out of 4 in the batch for now for testing purposes;
+            temp_inplace(logits, 0.8);
+            top_k_inplace(logits, 50);
+            top_p_inplace(logits);
+
+            softmax_inplace(logits); // they become probs at this point, so name is misleading now
+            samples[i] = multinomial(logits);
+
+            for (int c = 0; c <  8194; c++){
+                probs[i*8194 + c] = logits[c];
+            }
+
+        }
+        //probs
+        printValuesAboveThreshold(probs, .01);
+        printVector(samples, 2, "samples");
+
+
+
         /*
         for (int i =0; i < gf->n_nodes; i ++)
         {
