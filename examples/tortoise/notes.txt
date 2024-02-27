@@ -85,3 +85,8 @@ Mon Dec 11 11:09:04 2023
 |    0   N/A  N/A      2148      G   /usr/bin/gnome-shell               74MiB |
 |    0   N/A  N/A      2585      G   ...0/usr/lib/firefox/firefox       96MiB |
 +-----------------------------------------------------------------------------+
+
+02/22/2024 
+
+The current problem with with mul in layernorm 1. Something fishy is happening where it's duplicating the sample 1024 row 4 times when the first and last should be the same and the middle two rows should be different.
+This will require further debugging. 

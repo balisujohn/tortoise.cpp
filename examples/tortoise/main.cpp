@@ -104,7 +104,8 @@ struct autoregressive_model{
     struct ggml_tensor * language_model_head_linear_weights;
     struct ggml_tensor * language_model_head_linear_bias;
 
-    
+    struct ggml_tensor * memory_key; 
+    struct ggml_tensor * memory_value;
 
     std::vector<gpt2_layer> layers;
 
@@ -231,6 +232,9 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model multi layer perceptron projection bais
 
     }
+
+    buffer_size += 404 * 30 * ggml_type_sizef(GGML_TYPE_F32) *1024 * 4; // key cache (memory_key)
+    buffer_size +=  404 * 30 * ggml_type_sizef(GGML_TYPE_F32) * 1024 * 4; // value cache (memory_value)
     
 
     buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // final layer norm weight
@@ -249,7 +253,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(5 + 12*30 + 6),
+            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(5 + 12*30 + 8),
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
@@ -268,6 +272,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 #ifdef GGML_USE_CUBLAS
         fprintf(stderr, "%s: using CUDA backend\n", __func__);
         model.backend = ggml_backend_cuda_init();
+        std::cout << "created backend" << std::endl;
         if (!model.backend) {
             fprintf(stderr, "%s: ggml_backend_cuda_init() failed\n", __func__);
 
@@ -382,7 +387,12 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         model.tensors["text_pos_embedding.emb.weight"] = model.text_position_embedding_weights;
         model.tensors["conditioning_latent"] = model.conditioning_latent;
         model.tensors["mel_embedding.weight"] = model.mel_embedding_weights;
-        model.tensors["mel_pos_embedding.emb.weight"] = model.mel_position_embedding_weights;        
+        model.tensors["mel_pos_embedding.emb.weight"] = model.mel_position_embedding_weights;    
+
+
+        model.memory_key = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4 * 404 * 30 * 1024);
+        model.memory_value = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4 *  404 * 30 * 1024);    
+        
 
  {
         ggml_allocr * alloc = ggml_allocr_new_from_buffer(model.buffer_w);
@@ -483,6 +493,11 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
             total_size += ggml_nbytes(tensor);
         }
 
+
+        ggml_allocr_alloc(alloc, model.memory_key);
+        ggml_allocr_alloc(alloc, model.memory_value);
+
+
         ggml_allocr_free(alloc);
         printf("%s: model size  = %8.2f MB\n", __func__, total_size/1024.0/1024.0);
     }
@@ -501,12 +516,15 @@ struct ggml_cgraph * autoregressive_graph(
     const autoregressive_model & model,
     struct ggml_allocr * allocr,
     const std::vector<int>  mel_transformer_inputs_vector,
-    const std::vector<gpt_vocab::id> & tokens){
+    const std::vector<gpt_vocab::id> & tokens,
+    const bool fake_inputs,
+    const int n_past,
+    const int fixed_position){
 
     const int token_count = tokens.size();
 
 
-    static size_t buf_size = ggml_tensor_overhead()*(25 +70*32)  + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*(25 +70*38)  + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -521,6 +539,7 @@ struct ggml_cgraph * autoregressive_graph(
     struct ggml_cgraph  * gf = ggml_new_graph(ctx0);
 
     struct ggml_tensor * input = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, token_count);
+
 
     ggml_allocr_alloc(allocr, input);
     // avoid writing to tensors if we are only measuring the memory usage
@@ -538,101 +557,148 @@ struct ggml_cgraph * autoregressive_graph(
         }
     }
 
+    ggml_tensor * gpt2_input;
 
-    std::cout << "reached here" << std::endl;
+    std::cout << "tokens size" << std::endl;
+    std::cout << mel_transformer_inputs_vector.size() << std::endl;
+    if (fake_inputs) // 4 corresponds to batch of 4 sequences each with length 1
+    {
 
-    struct ggml_tensor * text_embedding = ggml_get_rows(ctx0, model.text_embedding_weights,input);
-    struct ggml_tensor * text_position_embedding = ggml_get_rows(ctx0, model.text_position_embedding_weights,position);
+        std::cout << "reached here" << std::endl;
+
+        struct ggml_tensor * text_embedding = ggml_get_rows(ctx0, model.text_embedding_weights,input);
+        struct ggml_tensor * text_position_embedding = ggml_get_rows(ctx0, model.text_position_embedding_weights,position);
 
 
-    struct ggml_tensor * reshaped_latent = ggml_reshape_4d(ctx0, model.conditioning_latent, 1,1,1,1024);
+        struct ggml_tensor * reshaped_latent = ggml_reshape_4d(ctx0, model.conditioning_latent, 1,1,1,1024);
 
-    struct ggml_tensor * embedding = ggml_add(ctx0,text_embedding, text_position_embedding);
+        struct ggml_tensor * embedding = ggml_add(ctx0,text_embedding, text_position_embedding);
 
-    struct ggml_tensor * reshaped_embedding = ggml_reshape_4d(ctx0, embedding, 1,1,token_count,1024);
+        struct ggml_tensor * reshaped_embedding = ggml_reshape_4d(ctx0, embedding, 1,1,token_count,1024);
 
-    /*
-    struct ggml_tensor * fake_inputs = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,  token_count+2); 
-    ggml_allocr_alloc(allocr, fake_inputs);
-    if (!ggml_allocr_is_measure(allocr)) {
-        int32_t v = 1;
-        int32_t start_mel_token = 8192;
-        for (int i = 0; i < token_count+1; ++i) {
-            ggml_backend_tensor_set(fake_inputs, &v, i*sizeof(int32_t), sizeof(v));
-        }
-        ggml_backend_tensor_set(fake_inputs, &start_mel_token, (token_count+1)*sizeof(int32_t), sizeof(start_mel_token));
-
-    }
-
-    int32_t truncation_index = token_count + 2;
-    */
-    
-
-    struct ggml_tensor * mel_transformer_inputs =   ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,4*( token_count+2));
-    ggml_allocr_alloc(allocr, mel_transformer_inputs);
-    
-    if (!ggml_allocr_is_measure(allocr)) {
-        for (int i = 0; i < 4*( token_count+2); ++i) {
-            int v = mel_transformer_inputs_vector[i];
-            ggml_backend_tensor_set(mel_transformer_inputs, &v, i*sizeof(int32_t), sizeof(v));
+        struct ggml_tensor * mel_transformer_inputs =   ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,4*mel_transformer_inputs_vector.size());
+        ggml_allocr_alloc(allocr, mel_transformer_inputs);
         
+        if (!ggml_allocr_is_measure(allocr)) {
+            for (int i = 0; i < 4*mel_transformer_inputs_vector.size(); ++i) {
+                int v = mel_transformer_inputs_vector[i];
+                ggml_backend_tensor_set(mel_transformer_inputs, &v, i*sizeof(int32_t), sizeof(v));
+            
+            }
+
         }
 
-    }
+
+        
+        mel_transformer_inputs = ggml_reshape_2d(ctx0, mel_transformer_inputs, 4, mel_transformer_inputs_vector.size()); 
 
 
+        struct ggml_tensor * truncated_mel_transformer_inputs = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,4); //hardcoding this instead of slicing it from mel_transformer_inputs
+        ggml_allocr_alloc(allocr, truncated_mel_transformer_inputs);
+        if (!ggml_allocr_is_measure(allocr)) {
+            int32_t start_mel_token = 8192;
+            for (int i = 0; i < 4; ++i) {
+                ggml_backend_tensor_set(truncated_mel_transformer_inputs, &start_mel_token, i*sizeof(int32_t), sizeof(start_mel_token));
+            }
+        }
 
-    //mel_transformer_inputs = ggml_repeat(ctx0, fake_inputs, mel_transformer_inputs);
+        struct ggml_tensor * mel_embedding = ggml_get_rows(ctx0, model.mel_embedding_weights,truncated_mel_transformer_inputs);
+
+
+        struct ggml_tensor * mel_position = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, 1);
+        ggml_allocr_alloc(allocr, mel_position);
+        if (!ggml_allocr_is_measure(allocr)) {
+                int32_t v = 0;
+                ggml_backend_tensor_set(mel_position, &v, 0, sizeof(v));
+        }
+
+        struct ggml_tensor * mel_position_embedding = ggml_get_rows(ctx0, model.mel_position_embedding_weights,mel_position);
+
+        mel_embedding = ggml_add(ctx0,mel_embedding, mel_position_embedding);
     
-    mel_transformer_inputs = ggml_reshape_2d(ctx0, mel_transformer_inputs, 4, (token_count + 2)); 
+    
+        mel_embedding = ggml_reshape_4d(ctx0, mel_embedding, 1, 4, 1, 1024);
 
 
-    struct ggml_tensor * truncated_mel_transformer_inputs = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,4); //hardcoding this instead of slicing it from mel_transformer_inputs
-    ggml_allocr_alloc(allocr, truncated_mel_transformer_inputs);
-    if (!ggml_allocr_is_measure(allocr)) {
-        int32_t start_mel_token = 8192;
-        for (int i = 0; i < 4; ++i) {
-            ggml_backend_tensor_set(truncated_mel_transformer_inputs, &start_mel_token, i*sizeof(int32_t), sizeof(start_mel_token));
+        struct ggml_tensor * output = ggml_concat(ctx0, reshaped_latent, reshaped_embedding);
+
+        struct ggml_tensor * repeated_output = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 4 * 17 * 1024); // todo do this more cleanly, going to rely on 1d copy for same of simplicity
+        output = ggml_reshape_1d(ctx0, output, 17*1024);
+
+
+        repeated_output =  ggml_repeat(ctx0, output, repeated_output);
+        repeated_output = ggml_reshape_4d(ctx0, repeated_output, 1,4,17,1024);
+
+
+
+        gpt2_input= ggml_concat(ctx0, repeated_output,mel_embedding);
+    }
+    else{
+        struct ggml_tensor * mel_transformer_inputs =   ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,4); 
+        ggml_allocr_alloc(allocr, mel_transformer_inputs);
+        
+        if (!ggml_allocr_is_measure(allocr)) {
+            for (int i = 0; i < 4; ++i) {
+                int v = mel_transformer_inputs_vector[i];
+                ggml_backend_tensor_set(mel_transformer_inputs, &v, i*sizeof(int32_t), sizeof(v));
+            
+            }
+
         }
+
+        
+        mel_transformer_inputs = ggml_reshape_2d(ctx0, mel_transformer_inputs, 4, 1); 
+
+
+        struct ggml_tensor * mel_embedding = ggml_get_rows(ctx0, model.mel_embedding_weights,mel_transformer_inputs);
+        ggml_set_name(mel_embedding, "mel embedding");
+
+        struct ggml_tensor * fixed_embedding_ids = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,1); 
+        ggml_allocr_alloc(allocr, fixed_embedding_ids);
+
+        if (!ggml_allocr_is_measure(allocr)) {
+            int v = fixed_position;
+            ggml_backend_tensor_set(fixed_embedding_ids, &v, 0, sizeof(v));
+
+        }
+
+        ggml_tensor * fixed_embedding = ggml_get_rows(ctx0, model.mel_position_embedding_weights,fixed_embedding_ids);
+
+        ggml_set_name(fixed_embedding, "fixed embedding");
+       
+       /* if(!fake_inputs && n_past ==19)
+        {
+                ggml_build_forward_expand(gf, fixed_embedding);
+                ggml_set_name(fixed_embedding, "fixedembedding");
+                return gf;
+        } */
+
+        gpt2_input =  ggml_add(ctx0,mel_embedding, fixed_embedding);
+        ggml_set_name(gpt2_input, "gpt2 input");
+
+        //std::cout << "ooga booga" << std::endl;
+        //ggml_build_forward_expand(gf, gpt2_input);
+        //ggml_free(ctx0);
+        //return gf;
+
     }
 
-    struct ggml_tensor * mel_embedding = ggml_get_rows(ctx0, model.mel_embedding_weights,truncated_mel_transformer_inputs);
 
-
-    struct ggml_tensor * mel_position = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, 1);
-    ggml_allocr_alloc(allocr, mel_position);
-    if (!ggml_allocr_is_measure(allocr)) {
-            int32_t v = 0;
-            ggml_backend_tensor_set(mel_position, &v, 0, sizeof(v));
+     /*
+    if ( !fake_inputs && n_past == 19)
+    {
+                ggml_set_name(gpt2_input, "gpt2 input");
+                ggml_build_forward_expand(gf, gpt2_input);
+                ggml_free(ctx0);
+                return gf;
     }
+    */
 
-    struct ggml_tensor * mel_position_embedding = ggml_get_rows(ctx0, model.mel_position_embedding_weights,mel_position);
+    int test_dimension = gpt2_input->ne[2];
+    std::cout << "test dimension: " << test_dimension << std::endl;
+    std::cout << "n_past: " << n_past << std::endl;
 
-    //struct ggml_tensor * mel_position_embedding_1d = ggml_reshape_1d(ctx0, mel_position_embedding, 1024);
-
-    mel_embedding = ggml_add(ctx0,mel_embedding, mel_position_embedding);
- 
- 
-    mel_embedding = ggml_reshape_4d(ctx0, mel_embedding, 1, 4, 1, 1024);
-
-
-    struct ggml_tensor * output = ggml_concat(ctx0, reshaped_latent, reshaped_embedding);
-
-    struct ggml_tensor * repeated_output = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 4 * 17 * 1024); // todo do this more cleanly, going to rely on 1d copy for same of simplicity
-    output = ggml_reshape_1d(ctx0, output, 17*1024);
-
-    //output = ggml_concat(output, )
-
-    repeated_output =  ggml_repeat(ctx0, output, repeated_output);
-    repeated_output = ggml_reshape_4d(ctx0, repeated_output, 1,4,17,1024);
-
-
-
-    ggml_tensor * gpt2_input = ggml_concat(ctx0, repeated_output,mel_embedding);
-
-
-
-    struct ggml_tensor * cur = ggml_reshape_4d(ctx0, gpt2_input, 1024,18,4,1);
+    struct ggml_tensor * cur = ggml_reshape_4d(ctx0, gpt2_input, 1024,test_dimension,4,1);
 
 
     struct ggml_tensor * Qcur;
@@ -656,21 +722,52 @@ struct ggml_cgraph * autoregressive_graph(
     struct ggml_tensor * test;
     for (int i = 0; i < 30; i++)
     {
+            std::cout << "reached: " << i << std::endl;
 
-
-           residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
            
+
+           residual = ggml_cpy(ctx0, cur, ggml_new_tensor_4d(ctx0, GGML_TYPE_F32,1024,test_dimension,4,1));
+           
+           //ggml_build_forward_expand(gf, residual);
            //layer norm
            
            cur = ggml_norm(ctx0, cur, 1e-05);
 
+           ggml_tensor * temp_cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne) );
+
+
+           ggml_set_name(temp_cur, "postnorm");
+           ggml_build_forward_expand(gf, temp_cur);
+
+
            ggml_format_name(cur, "l%d.norm", i);
-           cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.layers[i].linear_1_weights, cur),cur);
+
+           ggml_tensor * temp_ln_1_weights = ggml_repeat(ctx0,model.layers[i].linear_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+           ggml_set_name(temp_ln_1_weights, "weights");
+           //ggml_build_forward_expand(gf, temp_ln_1_weights);
+
+
+           cur = ggml_mul(ctx0, cur,temp_ln_1_weights); // if you flip the order of this it doesn't work on the second token generation process.TODO why does flipping the order of this break it?
+            
+           
            cur = ggml_add(ctx0,cur, model.layers[i].linear_1_bias);
+           
+          
 
 
-      
+            //ggml_tensor * temp_weights = ggml_cpy(ctx0, model.layers[i].linear_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].linear_1_weights->ne) );
+            ggml_tensor * temp_bias = ggml_cpy(ctx0, model.layers[i].linear_1_bias, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].linear_1_bias->ne) );
+ 
+          //  if(!fake_inputs)
+           // {
+            //ggml_build_forward_expand(gf, temp_bias);
+            //ggml_set_name(temp_bias, "bias");
+           // return gf;
+           // } 
 
+                
+                
           
             // this is implemented as conv1d in pytorch, but it's actually just a affine transformation with
             // a weight and bias
@@ -679,43 +776,59 @@ struct ggml_cgraph * autoregressive_graph(
                         cur);
 
 
+            cur = ggml_reshape_4d(ctx0, cur, 3072,test_dimension,4,1);
 
-            cur = ggml_add(ctx0,
-                    ggml_repeat(ctx0, model.layers[i].c_attention_attention_bias, cur),
-                    cur);
+
+            cur = ggml_add(ctx0,cur,
+                    model.layers[i].c_attention_attention_bias); // worth studying the diffs here, why did I have to remove this repeat for settings where the second dimension is 1?
             
             
             cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,cur->ne));
             cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,3,cur->ne));
 
 
-
+         
           
 
 
             //derived from ggml reference gpt-2 implementation
-            Qcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 0));
+            Qcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, test_dimension, 4, cur->nb[1], cur->nb[2], 0));
            
-            Kcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 1024 * sizeof(float)));
-            Vcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, 18, 4, cur->nb[1], cur->nb[2], 2048 * sizeof(float)));
+
+            //Kcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_4d(ctx0, cur, 1024, test_dimension, 4, 1,cur->nb[1], cur->nb[2],cur->nb[3], 1024 * sizeof(float)),0,1,3,2));
+
+            Kcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_3d(ctx0, cur, 1024, test_dimension, 4, cur->nb[1], cur->nb[2], 1024 * sizeof(float)),0,2,1,3));
+            Vcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_3d(ctx0, cur, 1024, test_dimension, 4, cur->nb[1], cur->nb[2], 2048 * sizeof(float)),0,2,1,3));
+
+            struct ggml_tensor * k = ggml_view_1d(ctx0, model.memory_key, 1024 * test_dimension * 4 , (ggml_element_size(model.memory_key)* ((i * 404 * 1024 * 4) + ((n_past) * 1024 *4))));
+            ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, k));
+            
+            struct ggml_tensor * v = ggml_view_1d(ctx0, model.memory_value, 1024 * test_dimension * 4 , (ggml_element_size(model.memory_value)* ((i * 404 * 1024 * 4) + ((n_past) * 1024 *4))));
+            ggml_build_forward_expand(gf, ggml_cpy(ctx0, Vcur, v));
+
 
             //num heads 16
             //head dim 64
           
-            Q =ggml_permute(ctx0,
-                        ggml_reshape_4d(ctx0, Qcur , 64,16,18,4),
-                        0, 2, 1, 3);
+            Q =ggml_cont(ctx0,ggml_permute(ctx0,
+                        ggml_reshape_4d(ctx0, Qcur , 64,16,test_dimension,4),
+                        0, 2, 1, 3));
+
             
             // this is likely not general and but should work for the first layer, may need generalizing once we reach
             //the end of the first layer.
-            K =ggml_permute(ctx0,
-                        ggml_reshape_4d(ctx0, Kcur , 64,16,18,4),
-                        0, 2, 1, 3);
+            K =ggml_cont(ctx0,ggml_permute(ctx0,
+                        ggml_reshape_4d(ctx0, ggml_view_1d(ctx0, model.memory_key, 1024 * (test_dimension + n_past) * 4 , (ggml_element_size(model.memory_key)* (i * 404 * 1024 * 4) )) , 64,16, 4 , test_dimension + n_past),
+                        0, 2,3, 1));
 
+          
+          
 
-            V_transposed = ggml_permute(ctx0,
-                        ggml_reshape_4d(ctx0, Vcur , 64,16,18,4),
-                        1,2,0,3);
+            V_transposed = ggml_cont(ctx0,ggml_permute(ctx0,
+                        ggml_reshape_4d(ctx0, ggml_view_1d(ctx0, model.memory_value, 1024 * (test_dimension + n_past) * 4 , (ggml_element_size(model.memory_value)* (i * 404 * 1024 * 4) )) , 64,16,4,test_dimension+n_past),
+                        1,2,3,0));
+
+          
 
             //casting to float16
             //V_transposed = ggml_cont_3d(ctx0,ggml_view_1d(ctx0,V_transposed,18*64*64,0),18, 64, 64);
@@ -730,9 +843,21 @@ struct ggml_cgraph * autoregressive_graph(
           //  K = ggml_cont_3d(ctx0,ggml_view_1d(ctx0,K,64*18*64,0),64, 18, 64);
           //  K = ggml_reshape_4d(ctx0,ggml_cpy(ctx0, K, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,K->ne)),64,18,16,4);
           ///  ggml_set_name(K,"key");
-        
 
+            std::cout << "???" << std::endl;
+
+            std::cout << K->ne[0]  << K->ne[1] << K->ne[2]  << K->ne[3] << std::endl;
+            std::cout << Q->ne[0]  << Q->ne[1] << Q->ne[2]  << Q->ne[3] << std::endl;
+            std::cout << V_transposed->ne[0]  << V_transposed->ne[1] << V_transposed->ne[2]  << V_transposed->ne[3] << std::endl;
             KQ = ggml_mul_mat(ctx0, K,Q);
+
+            std::cout << "KQ shape" << std::endl;
+            std::cout << KQ->ne[0]  << KQ->ne[1] << KQ->ne[2]  << KQ->ne[3] << std::endl;
+
+        
+       
+          
+            
 
             //KQ = ggml_reshape_1d(ctx0, KQ, KQ->ne[0]* KQ->ne[1]*KQ->ne[2]*KQ->ne[3]);
 
@@ -745,27 +870,40 @@ struct ggml_cgraph * autoregressive_graph(
             KQ_scaled = ggml_scale_inplace(ctx0, KQ, ggml_new_f32(ctx0,1.0f/sqrt(float(64))));
 
 
-            KQ_masked = ggml_diag_mask_inf_inplace(ctx0, KQ_scaled, 0);
+            KQ_masked = ggml_diag_mask_inf_inplace(ctx0, KQ_scaled, n_past);
 
 
             KQ_soft_max =  ggml_soft_max_inplace(ctx0, KQ_masked);
             
 
-
+            KQV = ggml_mul_mat(ctx0, KQ_soft_max, V_transposed);
             
-           KQV = ggml_mul_mat(ctx0, ggml_reshape_4d(ctx0,ggml_cont(ctx0,ggml_reshape_3d(ctx0, KQ_soft_max, 18,18,64)),18,18,16,4), V_transposed);
+           //KQV = ggml_mul_mat(ctx0, ggml_reshape_4d(ctx0,ggml_cont(ctx0,ggml_reshape_3d(ctx0, KQ_soft_max, test_dimension + n_past,test_dimension + n_past,64)),test_dimension + n_past,test_dimension+n_past,16,4), ggml_reshape_3d(ctx0,V_transposed,n_past + test_dimension, 16,);
       
+            ggml_set_name(KQ_soft_max, "after KQ");
+            ggml_set_name(V_transposed, "after V");
+
+
+          
+      
+        
 
            //getting the initial KQV value
-           KQV = ggml_reshape_3d(ctx0, KQV, 18,64,64);
+           KQV = ggml_reshape_3d(ctx0, KQV, test_dimension ,64,64);
            KQV = ggml_permute(ctx0, KQV, 1,0,2,3);
-           KQV = ggml_cont_3d(ctx0, KQV, 64,18,64);
-           KQV = ggml_reshape_4d(ctx0, KQV, 64,18,16,4);
+           KQV = ggml_cont_3d(ctx0, KQV, 64,test_dimension,64);
+           KQV = ggml_reshape_4d(ctx0, KQV, 64,test_dimension,16,4);
            
 
            //"merge heads" operation
            KQV_merged = ggml_permute(ctx0, KQV, 0,2,1,3);
-           KQV_merged = ggml_cont_3d(ctx0, KQV_merged, 1024, 18, 4);
+           KQV_merged = ggml_cont_3d(ctx0, KQV_merged, 1024, test_dimension, 4);
+    
+
+          
+      
+
+
 
             cur = ggml_mul_mat(ctx0,
                         ggml_reshape_2d( ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,model.layers[i].c_attention_projection_weights)),1024,1024),
@@ -773,14 +911,27 @@ struct ggml_cgraph * autoregressive_graph(
 
 
 
-            cur = ggml_add(ctx0,
-                    ggml_repeat(ctx0, model.layers[i].c_attention_projection_bias, cur),
-                    cur);
+            cur = ggml_add(ctx0,cur,
+                   model.layers[i].c_attention_projection_bias);
+
+
+
 
             //layer input passthrough
-            cur = ggml_add(ctx0, cur, residual);
+            //cur = ggml_add(ctx0, cur,residual);
+
+            cur = ggml_add(ctx0, ggml_reshape_1d(ctx0,cur, 1024 * 4 * test_dimension), ggml_reshape_1d(ctx0,residual, 1024 * 4 * test_dimension)); // it's really strange that this is necessary, why does it have different behavior than commented out above 
+            cur = ggml_reshape_4d(ctx0, cur, 1024, test_dimension, 4, 1);
+    
+
+
+            
+
+
+
 
             feed_forward_residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
 
 
 
@@ -788,8 +939,17 @@ struct ggml_cgraph * autoregressive_graph(
             cur = ggml_norm(ctx0, cur, 1e-05);
 
             ggml_format_name(cur, "l%d.norm_2", i);
-            cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.layers[i].linear_2_weights, cur),cur);
+
+            ggml_tensor * temp_ln_2_weights = ggml_repeat(ctx0,model.layers[i].linear_2_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+            ggml_set_name(temp_ln_2_weights, "test");
+
+
+            ggml_build_forward_expand(gf,temp_ln_2_weights);
+
+            cur = ggml_mul(ctx0, cur, temp_ln_2_weights);
             cur = ggml_add(ctx0,cur, model.layers[i].linear_2_bias);
+
 
 
 
@@ -800,54 +960,96 @@ struct ggml_cgraph * autoregressive_graph(
 
 
 
-            cur = ggml_add(ctx0,
-                    ggml_repeat(ctx0, model.layers[i].c_multi_layer_perceptron_fully_connected_bias, cur),
-                    cur);
+            cur = ggml_add(ctx0,cur, model.layers[i].c_multi_layer_perceptron_fully_connected_bias);
 
-
+            // gelu
             cur = ggml_gelu(ctx0, cur);
 
 
+            // mlp fully connected
             cur = ggml_mul_mat(ctx0,
                         ggml_reshape_2d( ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,model.layers[i].c_multi_layer_perceptron_projection_weights)),4096,1024),
                         cur);
 
 
-            cur = ggml_add(ctx0,
-                    ggml_repeat(ctx0, model.layers[i].c_multi_layer_perceptron_projection_bias, cur),
-                    cur);
+            cur = ggml_add(ctx0, cur, model.layers[i].c_multi_layer_perceptron_projection_bias);
 
 
-            cur = ggml_add(ctx0, cur, feed_forward_residual);
+
+            //final residual
+            //another case where I had to flatten before adding to get correct results. Either ggml had a pre-existing bug for batch addition, or one of my modifications introduced it. This will need to be addressed.
+            
+            cur = ggml_add(ctx0, ggml_reshape_1d(ctx0,cur , 1024 *  test_dimension *  4 *  1) , ggml_reshape_1d(ctx0,feed_forward_residual, 1024 *  test_dimension *  4 *  1));
+
+
+            cur = ggml_reshape_4d(ctx0, cur, 1024, test_dimension, 4, 1);
+            //cur = ggml_add(ctx0, cur, feed_forward_residual);
+
+
+         
+        
 
 
     }
 
+
+
     cur = ggml_norm(ctx0, cur, 1e-05);
 
-    cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.final_layer_norm_weights, cur),cur);
+
+    ggml_tensor * temp_final_layer_norm_weights = ggml_repeat(ctx0,model.final_layer_norm_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+
+    ggml_build_forward_expand(gf,temp_final_layer_norm_weights);
+
+
+
+    cur = ggml_mul(ctx0, cur, temp_final_layer_norm_weights);
     cur = ggml_add(ctx0,cur, model.final_layer_norm_bias);
 
+   
 
+    
+
+    
     cur = ggml_norm(ctx0, cur, 1e-05);
 
-    cur = ggml_mul(ctx0, ggml_repeat(ctx0,model.language_model_head_layer_norm_weights, cur),cur);
+
+
+    ggml_tensor * temp_language_model_head_layer_norm_weights = ggml_repeat(ctx0,model.language_model_head_layer_norm_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+    cur = ggml_mul(ctx0, cur, temp_language_model_head_layer_norm_weights);
     cur = ggml_add(ctx0,cur, model.language_model_head_layer_norm_bias);
     
+ 
+  
+
     cur = ggml_mul_mat(ctx0,
                         model.language_model_head_linear_weights,
                         cur);
 
 
 
-    cur = ggml_add(ctx0,
-            ggml_repeat(ctx0, model.language_model_head_linear_bias, cur),
-            cur);
+    cur = ggml_add(ctx0,cur,
+             model.language_model_head_linear_bias);
 
+    /*if(!fake_inputs)
+    {
+            ggml_build_forward_expand(gf, cur);
+            ggml_set_name(cur, "afterlmheadlayer");
+            return gf;
+    } */
+        
     
-    ggml_tensor * next_token_logits = ggml_cont(ctx0,ggml_view_4d(ctx0, cur, 8194, 1, 4, 1, cur->nb[1], cur->nb[2], cur->nb[3], 17 * sizeof(float) * 8194 ));
+    ggml_tensor * next_token_logits = ggml_cont(ctx0,ggml_view_4d(ctx0, cur, 8194, 1, 4, 1, cur->nb[1], cur->nb[2], cur->nb[3], (test_dimension-1) * sizeof(float) * 8194 )); // this "test_dimension - 1" business slices off the last batch of logits
 
     next_token_logits = ggml_reshape_4d(ctx0, next_token_logits, 8194, 4, 1,1);
+   
+
+    ggml_set_name(next_token_logits, "next token logits");
+
 
     //mel_transformer_inputs = ggml_reshape_4d(ctx0, mel_transformer_inputs, 18, 4, 1, 1);
 
@@ -896,7 +1098,7 @@ void printValuesAboveThreshold(const std::vector<float>& vec, float threshold) {
     std::cout << "REACHED 6 " << std::endl;
     for (size_t i = 0; i < vec.size(); ++i) {
         if (vec[i] > threshold) {
-            std::cout << "Index: " << i << ", Value: " << vec[i] << std::endl;
+            std::cout << "Index: " << i% 8194 << ", Value: " << vec[i] << std::endl;
         }
     }
 }
@@ -1065,7 +1267,7 @@ void top_p_inplace(std::vector<float > & src){
 }
 
 
-int multinomial( std::vector<float> probs) // worth chaning to a binary search at some point, but for now done the simple way
+int multinomial( std::vector<float> probs) // worth changing to a binary search at some point, but for now done the simple way
 {
 
     float sample = distribution(generator);
@@ -1085,6 +1287,79 @@ int multinomial( std::vector<float> probs) // worth chaning to a binary search a
 }
 
 
+
+//takes the raw logits coming out of of a pass through gpt2 and transforms them into a multinomial distribution, then samples from said distribution. 
+std::vector<int> process_logits_and_sample(ggml_cgraph * gf, std::vector<int>  &  mel_transformer_inputs_vector, int index)
+{
+
+
+
+        std::cout << "---------------------------------------------------" << std::endl;
+        ggml_tensor * next_token_logits = gf->nodes[gf->n_nodes-1];
+
+        std::cout << "NAME:" << std::endl;
+        std::cout << next_token_logits->name << std::endl;
+        std::cout << "TYPE" << std::endl;
+        std::cout <<  next_token_logits->type << std::endl;
+        std::cout << "SHAPE:" << std::endl;
+        std::cout << next_token_logits->ne[0]<< std::endl;
+        std::cout << next_token_logits->ne[1]<< std::endl;
+        std::cout << next_token_logits->ne[2]<< std::endl;
+        std::cout << next_token_logits->ne[3]<< std::endl;
+        std::cout << "DATA:" << std::endl;
+
+        //save_f32_tensor(next_token_logits, "logs/next_token_logits_" + std::to_string(index) +   ".data");
+
+        int elements = next_token_logits->ne[0] * next_token_logits->ne[1] * next_token_logits->ne[2] * next_token_logits->ne[3];
+
+
+        std::vector<float> next_token_logits_vector( elements);
+        ggml_backend_tensor_get(next_token_logits,next_token_logits_vector.data(), 0 ,sizeof(float)* elements); 
+        for (int c = 0; c < elements ; c++)
+        {
+                
+            if  (c < 3 || c > elements-4  || c == 1024*18-1|| c == 1024*18-2|| c == 1024*18 || c == 1024*18+2  || c == 17)
+            {
+            
+            std::cout << (next_token_logits_vector.data()[c])<< std::endl;
+            }
+        }
+        
+        std::cout << "reaced end" << std::endl;
+
+        std::vector<float> gather_result =  gather(next_token_logits_vector, mel_transformer_inputs_vector);
+        gather_result = apply_penalty(gather_result, 2.0);
+        std::cout << "BEGIN" << std::endl;
+        std::vector<float> transformed_mel_transformer_inputs_vector = scatter(next_token_logits_vector, gather_result, mel_transformer_inputs_vector);
+        
+        std::cout << transformed_mel_transformer_inputs_vector.size() << std::endl;
+        std::vector<int> samples(4); // batch size is 4
+
+
+        std::vector<float> probs(transformed_mel_transformer_inputs_vector.size());
+        for(int i = 0; i < 4; i ++) // hardcoded to batch size of 4
+        {
+
+            std::vector<float> logits;
+            logits.insert(logits.end(), transformed_mel_transformer_inputs_vector.begin() + (i * 8194), transformed_mel_transformer_inputs_vector.begin() + ((i+1)*8194));
+            assert(logits.size() == 8194);
+            //transformed_mel_transformer_inputs_vector.resize(8194); // just considering 1 out of 4 in the batch for now for testing purposes;
+            temp_inplace(logits, 0.8);
+            top_k_inplace(logits, 50);
+            top_p_inplace(logits);
+
+            softmax_inplace(logits); // they become probs at this point, so name is misleading now
+            samples[i] = multinomial(logits);
+
+            for (int c = 0; c <  8194; c++){
+                probs[i*8194 + c] = logits[c];
+            }
+
+        }
+        //probs
+        printValuesAboveThreshold(probs, .01);
+        return samples;
+}
 
 
 int main(int argc, char ** argv) {
@@ -1147,7 +1422,6 @@ int main(int argc, char ** argv) {
     }
 
     std::cout << "completed" << std::endl;
-    
 
 
     std::vector<int> mel_transformer_inputs_vector = std::vector<int>();
@@ -1170,199 +1444,207 @@ int main(int argc, char ** argv) {
 
     struct ggml_allocr * allocr = NULL;
     // allocate the compute buffer
+
+        // alignment required by the backend
+    size_t align = ggml_backend_get_alignment(model.backend);
+    std::cout << "alignment" << std::endl;
+    std::cout << align << std::endl;
+    allocr = ggml_allocr_new_measure(align);
+    std::cout << "align created" << std::endl;
+
+    // create the worst case graph for memory usage estimation
+    //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
+    //int n_past = model.hparams.n_ctx - n_tokens;
+    ggml_allocr_reset(allocr);
+    struct ggml_cgraph * gf = autoregressive_graph(model, allocr, mel_transformer_inputs_vector, tokens, true, 0,0);
+    ggml_graph_print(gf);
+
+    std::cout << "graph created" << std::endl;
+    // compute the required memory
+    size_t mem_size = ggml_allocr_alloc_graph(allocr, gf);
+
+    // recreate the allocator with the required memory
+    ggml_allocr_reset(allocr);
+    buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
+    allocr = ggml_allocr_new_from_buffer(buf_compute);
+    gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens, true, 0,0);
+    ggml_allocr_alloc_graph(allocr, gf);
+    std::cout << "reached computing time" << std::endl;
+    ggml_backend_graph_compute(model.backend, gf);
+    ggml_graph_print(gf);
+    std::vector<int> samples;
+    
+    std::string sample_string; 
+    int stop_token = 8193;
+    bool all_sequences_stopped = false;
+
+    std::vector<std::vector<int>> sequences(4);
+
+    int i = 0;
+    while (!all_sequences_stopped)
     {
-         // alignment required by the backend
-        size_t align = ggml_backend_get_alignment(model.backend);
-        std::cout << "alignment" << std::endl;
-        std::cout << align << std::endl;
-        allocr = ggml_allocr_new_measure(align);
-        std::cout << "align created" << std::endl;
+    samples =  process_logits_and_sample(gf,  mel_transformer_inputs_vector, i);
+    
+    
+    printVector(samples, 2, "samples");
 
-        // create the worst case graph for memory usage estimation
-        //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
-        //int n_past = model.hparams.n_ctx - n_tokens;
-        ggml_allocr_reset(allocr);
-        struct ggml_cgraph * gf = autoregressive_graph(model, allocr, mel_transformer_inputs_vector, tokens);
-        ggml_graph_print(gf);
+    sample_string = sample_string + ",[";
 
-        std::cout << "graph created" << std::endl;
-        // compute the required memory
-        size_t mem_size = ggml_allocr_alloc_graph(allocr, gf);
+    int stop_token_count = 0;
 
-        // recreate the allocator with the required memory
-        ggml_allocr_reset(allocr);
-        buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
-        allocr = ggml_allocr_new_from_buffer(buf_compute);
-        gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens);
-        ggml_allocr_alloc_graph(allocr, gf);
-        std::cout << "reached computing time" << std::endl;
-        ggml_backend_graph_compute(model.backend, gf);
-        ggml_graph_print(gf);
+    mel_transformer_inputs_vector.clear();
+    for (int c = 0; c < 4; c ++)
+    {
+        if (!(sequences[c].size()>0 && sequences[c][sequences[c].size()-1] == stop_token))
+        {
+            sequences[c].push_back(samples[c]);
+        }
+        if (samples[c] ==stop_token)
+        {
+            stop_token_count += 1;
+        }
+        mel_transformer_inputs_vector.push_back(samples[c]);
+        sample_string = sample_string  + std::to_string(samples[c]) + ',';
+    }
+    if (stop_token_count == 4)
+    {
+        all_sequences_stopped = true;
+    }
+    sample_string = sample_string + "]";
 
+    // mel_transformer_inputs_vector.push_back(8);
+    // mel_transformer_inputs_vector.push_back(45);
+    // mel_transformer_inputs_vector.push_back(20);
+    // mel_transformer_inputs_vector.push_back(8);
+    ggml_allocr_reset(allocr);
+    buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
+    allocr = ggml_allocr_new_from_buffer(buf_compute);
+    gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens, false, 18 + i, i+2);
+    ggml_allocr_alloc_graph(allocr, gf);
+    std::cout << "reached computing time" << std::endl;
+    ggml_backend_graph_compute(model.backend, gf);
+    i+= 1;
+    }
 
+    for (int i =0; i < gf->n_nodes; i ++)
+    {
+        ggml_tensor * test = gf->nodes[i];
+        if (std::string(test->name) != "fixedembedding" )
+        {
+            continue;
+        }
 
+        save_f32_tensor(test, "logs/" + std::string(test->name) + ".txt");
 
         std::cout << "---------------------------------------------------" << std::endl;
-        ggml_tensor * next_token_logits = gf->nodes[gf->n_nodes-1];
-
         std::cout << "NAME:" << std::endl;
-        std::cout << next_token_logits->name << std::endl;
+        std::cout << test->name << std::endl;
         std::cout << "TYPE" << std::endl;
-        std::cout <<  next_token_logits->type << std::endl;
+        std::cout <<  test->type << std::endl;
         std::cout << "SHAPE:" << std::endl;
-        std::cout << next_token_logits->ne[0]<< std::endl;
-        std::cout << next_token_logits->ne[1]<< std::endl;
-        std::cout << next_token_logits->ne[2]<< std::endl;
-        std::cout << next_token_logits->ne[3]<< std::endl;
+        std::cout << test->ne[0]<< std::endl;
+        std::cout << test->ne[1]<< std::endl;
+        std::cout << test->ne[2]<< std::endl;
+        std::cout << test->ne[3]<< std::endl;
         std::cout << "DATA:" << std::endl;
 
-        int elements = next_token_logits->ne[0] * next_token_logits->ne[1] * next_token_logits->ne[2] * next_token_logits->ne[3];
+        
+        
 
+        if (!ggml_is_contiguous(test))
+        {
+            std::cout << "Skipped data; not contiguous" << std::endl;
+            continue;
+        }
+        if (ggml_is_transposed(test))
+        {
+            std::cout << "Transposed:" << std::endl;
 
-        std::vector<float> next_token_logits_vector( elements);
-        ggml_backend_tensor_get(next_token_logits,next_token_logits_vector.data(), 0 ,sizeof(float)* elements); 
+        }
+
+        int elements = test->ne[0] * test->ne[1] * test->ne[2] * test->ne[3];
+
+        //ggml_tensor * weights = gf->leafs[gf->n_leafs -2];
+        //ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
+
+        //ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
+        //std::cout << "made it here" << std::endl;
+        if (test->type == GGML_TYPE_F32)
+        {
+        std::vector<float> test_read( elements);
+        ggml_backend_tensor_get(test,test_read.data(), 0 ,sizeof(float)* elements);
+    //        
         for (int c = 0; c < elements ; c++)
         {
                 
-            if  (c < 3 || c > elements-4  || c == 1024*18-1|| c == 1024*18-2|| c == 1024*18 || c == 1024*18+2  || c == 17)
+            if  (c < 3 || c > elements-4  || c == 2*1024 || c == 1024)
             {
             
-            std::cout << (next_token_logits_vector.data()[c])<< std::endl;
+            std::cout << (test_read.data()[c])<< std::endl;
             }
         }
-        
-        std::cout << "reaced end" << std::endl;
-
-        std::vector<float> gather_result =  gather(next_token_logits_vector, mel_transformer_inputs_vector);
-        gather_result = apply_penalty(gather_result, 2.0);
-        std::cout << "BEGIN" << std::endl;
-        std::vector<float> transformed_mel_transformer_inputs_vector = scatter(next_token_logits_vector, gather_result, mel_transformer_inputs_vector);
-        
-        std::cout << transformed_mel_transformer_inputs_vector.size() << std::endl;
-        std::vector<int> samples(4); // batch size is 4
-
-
-        std::vector<float> probs(transformed_mel_transformer_inputs_vector.size());
-        for(int i = 0; i < 4; i ++) // hardcoded to batch size of 4
-        {
-
-            std::vector<float> logits;
-            logits.insert(logits.end(), transformed_mel_transformer_inputs_vector.begin() + (i * 8194), transformed_mel_transformer_inputs_vector.begin() + ((i+1)*8194));
-            assert(logits.size() == 8194);
-            //transformed_mel_transformer_inputs_vector.resize(8194); // just considering 1 out of 4 in the batch for now for testing purposes;
-            temp_inplace(logits, 0.8);
-            top_k_inplace(logits, 50);
-            top_p_inplace(logits);
-
-            softmax_inplace(logits); // they become probs at this point, so name is misleading now
-            samples[i] = multinomial(logits);
-
-            for (int c = 0; c <  8194; c++){
-                probs[i*8194 + c] = logits[c];
-            }
-
         }
-        //probs
-        printValuesAboveThreshold(probs, .01);
-        printVector(samples, 2, "samples");
-
-
-
-        /*
-        for (int i =0; i < gf->n_nodes; i ++)
+        else if(test->type == GGML_TYPE_F16)
         {
-            std::cout << "---------------------------------------------------" << std::endl;
-            ggml_tensor * test = gf->nodes[i];
-            std::cout << "NAME:" << std::endl;
-            std::cout << test->name << std::endl;
-            std::cout << "TYPE" << std::endl;
-            std::cout <<  test->type << std::endl;
-            std::cout << "SHAPE:" << std::endl;
-            std::cout << test->ne[0]<< std::endl;
-            std::cout << test->ne[1]<< std::endl;
-            std::cout << test->ne[2]<< std::endl;
-            std::cout << test->ne[3]<< std::endl;
-            std::cout << "DATA:" << std::endl;
-
-
-            if (!ggml_is_contiguous(test))
+            std::vector<ggml_fp16_t> test_read( elements);
+        ggml_backend_tensor_get(test,test_read.data(), 0 ,sizeof(ggml_fp16_t)* elements);
+    //        
+        for (int c = 0; c < elements ; c++)
+        {
+            if  (c < 3 || c > elements-4)
             {
-                std::cout << "Skipped data; not contiguous" << std::endl;
-                continue;
-            }
-            if (ggml_is_transposed(test))
-            {
-                std::cout << "Transposed:" << std::endl;
-
-            }
-
-            int elements = test->ne[0] * test->ne[1] * test->ne[2] * test->ne[3];
-
-            //ggml_tensor * weights = gf->leafs[gf->n_leafs -2];
-            //ggml_tensor * tokens = gf->leafs[gf->n_leafs -1];
-
-            //ggml_graph_dump_dot(gf, NULL, "autoregressive.dot");
-            //std::cout << "made it here" << std::endl;
-            if (test->type == GGML_TYPE_F32)
-            {
-            std::vector<float> test_read( elements);
-            ggml_backend_tensor_get(test,test_read.data(), 0 ,sizeof(float)* elements);
-//        
-            for (int c = 0; c < elements ; c++)
-            {
-                 
-                if  (c < 3 || c > elements-4  || c == 1024*18-1|| c == 1024*18-2|| c == 1024*18 || c == 1024*18+2  || c == 17)
-                {
-               
-                std::cout << (test_read.data()[c])<< std::endl;
-                }
-            }
-            }
-            else if(test->type == GGML_TYPE_F16)
-            {
-             std::vector<ggml_fp16_t> test_read( elements);
-            ggml_backend_tensor_get(test,test_read.data(), 0 ,sizeof(ggml_fp16_t)* elements);
-//        
-            for (int c = 0; c < elements ; c++)
-            {
-                if  (c < 3 || c > elements-4)
-                {
-                
-                std::cout << ggml_fp16_to_fp32(test_read.data()[c])<< std::endl;
-                }
-            }
-            } 
-            else if(test->type == GGML_TYPE_I32){
-            std::vector<int32_t> test_read( elements);
-            ggml_backend_tensor_get(test,test_read.data(), 0 ,sizeof(int32_t)* elements);
-//        
-            for (int c = 0; c < elements ; c++)
-            {
-                if  (c < 3 || c > elements-4)
-                {
-                
-                std::cout << test_read.data()[c]<< std::endl;
-                }
-            }
-            }
             
-        
-        
-        
+            std::cout << ggml_fp16_to_fp32(test_read.data()[c])<< std::endl;
+            }
         }
-        */
-       // ggml_graph_print   (gf);
-
-
-        //std::cout << (float * )test->data << std::endl;
-        //std::cout <<"test" << std::endl;
-        //std::cout << ggml_get_i32_1d(test,0) << std::endl;
-
-
-
-        //fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
+        } 
+        else if(test->type == GGML_TYPE_I32){
+        std::vector<int32_t> test_read( elements);
+        ggml_backend_tensor_get(test,test_read.data(), 0 ,sizeof(int32_t)* elements);
+    //        
+        for (int c = 0; c < elements ; c++)
+        {
+            if  (c < 3 || c > elements-4)
+            {
+            
+            std::cout << test_read.data()[c]<< std::endl;
+            }
+        }
+        }
         
+
+
+
     }
+
+    // Iterate through the outer vector
+    for (const auto& inner_vector : sequences) {
+        // Print the inner vector as a Python list literal
+        std::cout << "[";
+        for (size_t i = 0; i < inner_vector.size(); ++i) {
+            std::cout << inner_vector[i];
+            if (i < inner_vector.size() - 1) {
+                std::cout << ", ";
+            }
+        }
+        std::cout << "]" << std::endl;
+    }
+
+
+    //std::cout << sample_string << std::endl;
+    
+    // ggml_graph_print   (gf);
+
+
+    //std::cout << (float * )test->data << std::endl;
+    //std::cout <<"test" << std::endl;
+    //std::cout << ggml_get_i32_1d(test,0) << std::endl;
+
+
+
+    //fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
+        
+    
 
     return 0;
   
