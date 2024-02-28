@@ -711,12 +711,12 @@ struct ggml_cgraph * autoregressive_graph(
 
         struct ggml_tensor * output = ggml_concat(ctx0, reshaped_latent, reshaped_embedding);
 
-        struct ggml_tensor * repeated_output = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 4 * 17 * 1024); // todo do this more cleanly, going to rely on 1d copy for same of simplicity
-        output = ggml_reshape_1d(ctx0, output, 17*1024);
+        struct ggml_tensor * repeated_output = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 4 * (tokens.size()+1) * 1024); // todo do this more cleanly, going to rely on 1d copy for same of simplicity
+        output = ggml_reshape_1d(ctx0, output, (tokens.size()+1)*1024);
 
 
         repeated_output =  ggml_repeat(ctx0, output, repeated_output);
-        repeated_output = ggml_reshape_4d(ctx0, repeated_output, 1,4,17,1024);
+        repeated_output = ggml_reshape_4d(ctx0, repeated_output, 1,4,(tokens.size()+1),1024);
 
 
 
@@ -811,8 +811,6 @@ struct ggml_cgraph * autoregressive_graph(
     struct ggml_tensor * test;
     for (int i = 0; i < 30; i++)
     {
-            std::cout << "reached: " << i << std::endl;
-
            
 
            residual = ggml_cpy(ctx0, cur, ggml_new_tensor_4d(ctx0, GGML_TYPE_F32,1024,test_dimension,4,1));
@@ -919,29 +917,13 @@ struct ggml_cgraph * autoregressive_graph(
 
           
 
-            //casting to float16
-            //V_transposed = ggml_cont_3d(ctx0,ggml_view_1d(ctx0,V_transposed,18*64*64,0),18, 64, 64);
-            //V_transposed = ggml_reshape_4d(ctx0,ggml_cpy(ctx0, V_transposed, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,V_transposed->ne)),18,64,16,4);
-
-                    
-            //casting to float16
-         //   Q = ggml_cont_3d(ctx0,ggml_view_1d(ctx0,Q,64*18*64,0),64, 18, 64);
-          //  Q = ggml_reshape_4d(ctx0,ggml_cpy(ctx0, Q, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,Q->ne)),64,18,16,4);
-           // ggml_set_name(Q, "query");
-            //casting to float16
-          //  K = ggml_cont_3d(ctx0,ggml_view_1d(ctx0,K,64*18*64,0),64, 18, 64);
-          //  K = ggml_reshape_4d(ctx0,ggml_cpy(ctx0, K, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,K->ne)),64,18,16,4);
-          ///  ggml_set_name(K,"key");
-
-            std::cout << "???" << std::endl;
-
-            std::cout << K->ne[0]  << K->ne[1] << K->ne[2]  << K->ne[3] << std::endl;
-            std::cout << Q->ne[0]  << Q->ne[1] << Q->ne[2]  << Q->ne[3] << std::endl;
-            std::cout << V_transposed->ne[0]  << V_transposed->ne[1] << V_transposed->ne[2]  << V_transposed->ne[3] << std::endl;
+            //std::cout << K->ne[0]  << K->ne[1] << K->ne[2]  << K->ne[3] << std::endl;
+            //std::cout << Q->ne[0]  << Q->ne[1] << Q->ne[2]  << Q->ne[3] << std::endl;
+            //std::cout << V_transposed->ne[0]  << V_transposed->ne[1] << V_transposed->ne[2]  << V_transposed->ne[3] << std::endl;
             KQ = ggml_mul_mat(ctx0, K,Q);
 
-            std::cout << "KQ shape" << std::endl;
-            std::cout << KQ->ne[0]  << KQ->ne[1] << KQ->ne[2]  << KQ->ne[3] << std::endl;
+            //std::cout << "KQ shape" << std::endl;
+            //std::cout << KQ->ne[0]  << KQ->ne[1] << KQ->ne[2]  << KQ->ne[3] << std::endl;
 
         
        
@@ -1415,15 +1397,8 @@ std::vector<int> process_logits_and_sample(ggml_cgraph * gf, std::vector<int>  &
 
         std::vector<float> next_token_logits_vector( elements);
         ggml_backend_tensor_get(next_token_logits,next_token_logits_vector.data(), 0 ,sizeof(float)* elements); 
-        for (int c = 0; c < elements ; c++)
-        {
-                
-            if  (c < 3 || c > elements-4  || c == 1024*18-1|| c == 1024*18-2|| c == 1024*18 || c == 1024*18+2  || c == 17)
-            {
-            
-            std::cout << (next_token_logits_vector.data()[c])<< std::endl;
-            }
-        }
+      
+
         
         std::cout << "reaced end" << std::endl;
 
@@ -1501,6 +1476,9 @@ int main(int argc, char ** argv) {
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
 
 
+    //std::cout << tokens.size() << std::endl;
+    //exit(0);
+
     for (int i =0; i < tokens.size(); i ++)
     {
         std::cout << tokens[i] << std::endl;
@@ -1539,7 +1517,7 @@ int main(int argc, char ** argv) {
 
     std::vector<int> mel_transformer_inputs_vector = std::vector<int>();
     mel_transformer_inputs_vector.resize((tokens.size() + 2) * 4);
-    assert(tokens.size() == 16);
+    //assert(tokens.size() == 16);
     
     for (int i = 0; i < mel_transformer_inputs_vector.size(); i ++)
     {
@@ -1570,7 +1548,7 @@ int main(int argc, char ** argv) {
     //int n_past = model.hparams.n_ctx - n_tokens;
     ggml_allocr_reset(allocr);
     struct ggml_cgraph * gf = autoregressive_graph(model, allocr, mel_transformer_inputs_vector, tokens, true, 0,0);
-    ggml_graph_print(gf);
+    //ggml_graph_print(gf);
 
     std::cout << "graph created" << std::endl;
     // compute the required memory
@@ -1584,7 +1562,7 @@ int main(int argc, char ** argv) {
     ggml_allocr_alloc_graph(allocr, gf);
     std::cout << "reached computing time" << std::endl;
     ggml_backend_graph_compute(model.backend, gf);
-    ggml_graph_print(gf);
+    //ggml_graph_print(gf);
     std::vector<int> samples;
     
     std::string sample_string; 
@@ -1628,7 +1606,7 @@ int main(int argc, char ** argv) {
     ggml_allocr_reset(allocr);
     buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
     allocr = ggml_allocr_new_from_buffer(buf_compute);
-    gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens, false, 18 + i, i+2);
+    gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens, false, tokens.size() + 2 + i, i+2);
     ggml_allocr_alloc_graph(allocr, gf);
     std::cout << "reached computing time" << std::endl;
     ggml_backend_graph_compute(model.backend, gf);
