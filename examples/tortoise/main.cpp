@@ -313,7 +313,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
     buffer_size += 1024 * 8194  * ggml_type_sizef(GGML_TYPE_F32); // language model head linear weight
     buffer_size += 8194 * ggml_type_sizef(GGML_TYPE_F32); // language model head linear bias
 
-    buffer_size += 128; // ???
+    buffer_size += 128; // related to alignment
 
 
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
@@ -1472,9 +1472,9 @@ int main(int argc, char ** argv) {
     
     std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
     //std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
-    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
-
+    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
 
     //std::cout << tokens.size() << std::endl;
     //exit(0);
