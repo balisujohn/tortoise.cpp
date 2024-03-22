@@ -576,6 +576,182 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
 }
 
+/*
+                                                                                                                                                                                            
+  ██████╗ ██████╗ ████████╗   ██████╗     ██╗      █████╗ ████████╗███████╗███╗   ██╗████████╗    ███████╗ ██████╗ ██████╗ ██╗    ██╗ █████╗ ██████╗ ██████╗     ██████╗  █████╗ ███████╗███████╗
+ ██╔════╝ ██╔══██╗╚══██╔══╝   ╚════██╗    ██║     ██╔══██╗╚══██╔══╝██╔════╝████╗  ██║╚══██╔══╝    ██╔════╝██╔═══██╗██╔══██╗██║    ██║██╔══██╗██╔══██╗██╔══██╗    ██╔══██╗██╔══██╗██╔════╝██╔════╝
+ ██║  ███╗██████╔╝   ██║█████╗ █████╔╝    ██║     ███████║   ██║   █████╗  ██╔██╗ ██║   ██║       █████╗  ██║   ██║██████╔╝██║ █╗ ██║███████║██████╔╝██║  ██║    ██████╔╝███████║███████╗███████╗
+ ██║   ██║██╔═══╝    ██║╚════╝██╔═══╝     ██║     ██╔══██║   ██║   ██╔══╝  ██║╚██╗██║   ██║       ██╔══╝  ██║   ██║██╔══██╗██║███╗██║██╔══██║██╔══██╗██║  ██║    ██╔═══╝ ██╔══██║╚════██║╚════██║
+ ╚██████╔╝██║        ██║      ███████╗    ███████╗██║  ██║   ██║   ███████╗██║ ╚████║   ██║       ██║     ╚██████╔╝██║  ██║╚███╔███╔╝██║  ██║██║  ██║██████╔╝    ██║     ██║  ██║███████║███████║
+  ╚═════╝ ╚═╝        ╚═╝      ╚══════╝    ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═══╝   ╚═╝       ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝     ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝
+                                                                                                                                                                                                                                                                                                                                                                 
+*/
+struct ggml_cgraph * autoregressive_latent_graph(
+    const autoregressive_model & model,
+    struct ggml_allocr * allocr,
+    const std::vector<int>  mel_transformer_inputs_vector,
+    const std::vector<gpt_vocab::id> & tokens
+){
+    const int token_count = tokens.size();
+    //std::cout << "token count: " << token_count << std::endl;
+    //exit(0);
+    const int mel_token_count = mel_transformer_inputs_vector.size();
+
+
+
+    static size_t buf_size = ggml_tensor_overhead()*(100)  + ggml_graph_overhead(); //placeholder big value 
+    static std::vector<uint8_t> buf(buf_size);
+
+
+    struct ggml_init_params params = {
+        /*.mem_size   =*/ buf_size,
+        /*.mem_buffer =*/ buf.data(),
+        /*.no_alloc   =*/ true, // the tensors will be allocated later by ggml_allocr_alloc_graph()
+    };
+
+    struct ggml_context * ctx0 = ggml_init(params);
+
+    struct ggml_cgraph  * gf = ggml_new_graph(ctx0);
+
+
+    struct ggml_tensor * input = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, token_count * 4);
+
+
+    std::cout << "token count" << token_count << std::endl;
+
+    ggml_allocr_alloc(allocr, input);
+    // avoid writing to tensors if we are only measuring the memory usage
+    if (!ggml_allocr_is_measure(allocr)) {
+        for (int i =0; i < 4; i ++)
+        {
+            ggml_backend_tensor_set(input, tokens.data(), i * token_count * ggml_element_size(input) , token_count*ggml_element_size(input));
+        }
+    }
+
+    ggml_set_name(input, "text input codes");
+
+
+
+   struct ggml_tensor * input_position = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, token_count * 4);
+    ggml_allocr_alloc(allocr, input_position);
+    if (!ggml_allocr_is_measure(allocr)) {
+            for (int i = 0; i < 4; i ++)
+            {
+                for (int c =0; c < token_count; c++)
+                {
+                int32_t v = c;
+                ggml_backend_tensor_set(input_position, &v, ((i * token_count)+c) * sizeof(int32_t), sizeof(v));
+                }
+            
+            }
+    }
+
+
+
+
+    struct ggml_tensor * mel_codes = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, mel_token_count);
+
+    ggml_set_name(mel_codes, "mel_codes");
+
+    ggml_allocr_alloc(allocr, mel_codes);
+
+    if (!ggml_allocr_is_measure(allocr)) {
+        for (int i = 0; i < mel_token_count; ++i) {
+            int32_t v = mel_transformer_inputs_vector[i];
+            ggml_backend_tensor_set(mel_codes, &v, i*sizeof(int32_t), sizeof(v));
+        }
+    }
+
+   // ggml_tensor * temp_cur = ggml_cpy(ctx0, mel_codes, ggml_new_tensor(ctx0, GGML_TYPE_I32,4,mel_codes->ne) );
+
+    struct ggml_tensor * mel_embedding = ggml_get_rows(ctx0, model.mel_embedding_weights,mel_codes);
+
+
+    //struct ggml_tensor * mel_embedding = ggml_get_rows(ctx0, model.mel_embedding_weights,input);
+
+    ggml_set_name(model.mel_embedding_weights, "mel emb weights");
+    ggml_set_name(mel_embedding, "mel embedding");
+
+
+
+    struct ggml_tensor * mel_position = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, mel_token_count);
+    ggml_allocr_alloc(allocr, mel_position);
+    if (!ggml_allocr_is_measure(allocr)) {
+            for (int i = 0; i < 4; i ++)
+            {
+                for (int c =0; c < mel_token_count / 4; c++)
+                {
+                int32_t v = c;
+                ggml_backend_tensor_set(mel_position, &v, ((i * (mel_token_count/4))+c) * sizeof(int32_t), sizeof(v));
+                }
+            
+            }
+    }
+
+    struct ggml_tensor * mel_position_embedding = ggml_get_rows(ctx0, model.mel_position_embedding_weights,mel_position);
+
+
+
+
+    ggml_set_name(mel_position_embedding, "mel position embedding");
+
+
+
+
+    mel_embedding = ggml_add(ctx0,mel_embedding, mel_position_embedding);
+
+
+
+    struct ggml_tensor * text_embedding = ggml_get_rows(ctx0, model.text_embedding_weights,input);
+    struct ggml_tensor * text_position_embedding = ggml_get_rows(ctx0, model.text_position_embedding_weights,input_position);
+
+
+
+    struct ggml_tensor * embedding = ggml_add(ctx0,text_embedding, text_position_embedding);
+    ggml_set_name(embedding, "final text embedding");
+
+
+
+
+    ggml_build_forward_expand(gf, embedding);
+    
+
+
+    /*
+    struct ggml_tensor * input = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, token_count);
+
+
+    ggml_allocr_alloc(allocr, input);
+    // avoid writing to tensors if we are only measuring the memory usage
+    if (!ggml_allocr_is_measure(allocr)) {
+        ggml_backend_tensor_set(input, tokens.data(), 0, token_count*ggml_element_size(input));
+    }
+
+
+    struct ggml_tensor * position = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, token_count);
+    ggml_allocr_alloc(allocr, position);
+    if (!ggml_allocr_is_measure(allocr)) {
+        for (int i = 0; i < token_count; ++i) {
+            int32_t v = i;
+            ggml_backend_tensor_set(position, &v, i*sizeof(int32_t), sizeof(v));
+        }
+    }
+
+    
+    ggml_build_forward_expand(ctx0, position);
+    ggml_set_name()
+    */
+
+
+    ggml_free(ctx0);
+    return gf;
+
+}
+
+
+
+
+
 
 /*
  
@@ -721,6 +897,13 @@ struct ggml_cgraph * autoregressive_graph(
 
 
         gpt2_input= ggml_concat(ctx0, repeated_output,mel_embedding);
+
+                
+        ggml_tensor * final_latent = ggml_cpy(ctx0, gpt2_input, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,gpt2_input->ne));
+
+        ggml_set_name(final_latent, "gpt2 input");
+        ggml_build_forward_expand(gf, final_latent);
+ 
     }
     else{
         struct ggml_tensor * mel_transformer_inputs =   ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,4); 
@@ -765,7 +948,6 @@ struct ggml_cgraph * autoregressive_graph(
         gpt2_input =  ggml_add(ctx0,mel_embedding, fixed_embedding);
         ggml_set_name(gpt2_input, "gpt2 input");
 
-        //std::cout << "ooga booga" << std::endl;
         //ggml_build_forward_expand(gf, gpt2_input);
         //ggml_free(ctx0);
         //return gf;
@@ -1079,10 +1261,8 @@ struct ggml_cgraph * autoregressive_graph(
     cur = ggml_mul(ctx0, cur, temp_final_layer_norm_weights);
     cur = ggml_add(ctx0,cur, model.final_layer_norm_bias);
 
-   
 
     
-
     
     cur = ggml_norm(ctx0, cur, 1e-05);
 
@@ -1094,7 +1274,7 @@ struct ggml_cgraph * autoregressive_graph(
     cur = ggml_mul(ctx0, cur, temp_language_model_head_layer_norm_weights);
     cur = ggml_add(ctx0,cur, model.language_model_head_layer_norm_bias);
     
- 
+
   
 
     cur = ggml_mul_mat(ctx0,
@@ -1114,8 +1294,13 @@ struct ggml_cgraph * autoregressive_graph(
     } */
         
     
+    
     ggml_tensor * next_token_logits = ggml_cont(ctx0,ggml_view_4d(ctx0, cur, 8194, 1, 4, 1, cur->nb[1], cur->nb[2], cur->nb[3], (test_dimension-1) * sizeof(float) * 8194 )); // this "test_dimension - 1" business slices off the last batch of logits
 
+    
+    
+
+    
     next_token_logits = ggml_reshape_4d(ctx0, next_token_logits, 8194, 4, 1,1);
    
 
@@ -1156,6 +1341,31 @@ struct ggml_cgraph * autoregressive_graph(
                                                                                                                                
 */
 
+
+//great work openchat3.5!!!
+void apply_padding(std::vector<int>& vec) {
+    // Remove any trailing 8139's from the vector
+    while (!vec.empty() && vec.back() == 8139) {
+        vec.pop_back();
+    }
+
+    // Assert that the vector is shorter than or equal to 500 in length
+    assert(vec.size() <= 500);
+
+    // Fill in the int value 83 up to the end of the vector
+    for (size_t i = vec.size(); i < 500; ++i) {
+        vec.push_back(83);
+    }
+
+    // Replace the last 3 ints with 45, 45, 248
+    vec[vec.size() - 3] = 45;
+    vec[vec.size() - 2] = 45;
+    vec[vec.size() - 1] = 248;
+
+    vec.push_back(8193);
+
+    vec.insert(vec.begin(), 8192);
+}
 
 template <typename T>
 void printVector(std::vector<T> vector, int n, std::string name) {
@@ -1436,187 +1646,24 @@ std::vector<int> process_logits_and_sample(ggml_cgraph * gf, std::vector<int>  &
         return samples;
 }
 
+// prints either all leaves from a computational graph, or all the nodes
+void print_all_tensors(struct ggml_cgraph * gf, bool leaves, bool filter_flag, std::string filter){
 
+    int count = leaves ? gf->n_leafs : gf->n_nodes;
 
-/*
- 
- ███╗   ███╗ █████╗ ██╗███╗   ██╗
- ████╗ ████║██╔══██╗██║████╗  ██║
- ██╔████╔██║███████║██║██╔██╗ ██║
- ██║╚██╔╝██║██╔══██║██║██║╚██╗██║
- ██║ ╚═╝ ██║██║  ██║██║██║ ╚████║
- ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
-                                 
- 
-*/
-
-int main(int argc, char ** argv) {
-
-    std::cout << "hello world" << std::endl;
-    
-
-    
-    //std::uniform_real_distribution<float> distribution(0.0, 1.0);
-    /*
-    std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-        std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-    */
-    gpt_vocab vocab;
-    gpt_vocab_init("../examples/tortoise/tokenizer.json", vocab);
-    
-    std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
-    //std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
-    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
-    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
-    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
-
-    //std::cout << tokens.size() << std::endl;
-    //exit(0);
-
-    for (int i =0; i < tokens.size(); i ++)
+    for (int i =0; i < count; i ++)
     {
-        std::cout << tokens[i] << std::endl;
-    }   
-    //todo see why this tokenization doesn't match the tokenization produced by tortoise-tts (tortoise tts one does not always use the token corresponding to the most characters)
-
-
-    ggml_time_init();
-    const int64_t t_main_start_us = ggml_time_us();
-
-
-    int64_t t_load_us = 0;
-
-    std::string file_path = "../examples/tortoise/ggml-model.bin";
-
-
-    autoregressive_model model;
-
-
-
-    // load the model
-    {
-        const int64_t t_start_us = ggml_time_us();
-
-        if (!autoregressive_model_load(file_path, model)) {
-            fprintf(stderr, "%s: failed to load model from '%s'\n", __func__, file_path.c_str());
-            return 1;
-        }
-
-        t_load_us = ggml_time_us() - t_start_us;
-
-    }
-
-    std::cout << "completed" << std::endl;
-
-
-    std::vector<int> mel_transformer_inputs_vector = std::vector<int>();
-    mel_transformer_inputs_vector.resize((tokens.size() + 2) * 4);
-    //assert(tokens.size() == 16);
-    
-    for (int i = 0; i < mel_transformer_inputs_vector.size(); i ++)
-    {
-        if (i % (tokens.size()+2) == tokens.size()+2-1){
-            mel_transformer_inputs_vector[i] = 8192;
+        ggml_tensor * test;
+        if (leaves){
+         test = gf->leafs[i];
         }
         else{
-            mel_transformer_inputs_vector[i] = 1;
+         test = gf->nodes[i];
         }
-    }
-
-
-
-    ggml_backend_buffer_t buf_compute;
-
-    struct ggml_allocr * allocr = NULL;
-    // allocate the compute buffer
-
-        // alignment required by the backend
-    size_t align = ggml_backend_get_alignment(model.backend);
-    std::cout << "alignment" << std::endl;
-    std::cout << align << std::endl;
-    allocr = ggml_allocr_new_measure(align);
-    std::cout << "align created" << std::endl;
-
-    // create the worst case graph for memory usage estimation
-    //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
-    //int n_past = model.hparams.n_ctx - n_tokens;
-    ggml_allocr_reset(allocr);
-    struct ggml_cgraph * gf = autoregressive_graph(model, allocr, mel_transformer_inputs_vector, tokens, true, 0,0);
-    //ggml_graph_print(gf);
-
-    std::cout << "graph created" << std::endl;
-    // compute the required memory
-    size_t mem_size = ggml_allocr_alloc_graph(allocr, gf);
-
-    // recreate the allocator with the required memory
-    ggml_allocr_reset(allocr);
-    buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
-    allocr = ggml_allocr_new_from_buffer(buf_compute);
-    gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens, true, 0,0);
-    ggml_allocr_alloc_graph(allocr, gf);
-    std::cout << "reached computing time" << std::endl;
-    ggml_backend_graph_compute(model.backend, gf);
-    //ggml_graph_print(gf);
-    std::vector<int> samples;
-    
-    std::string sample_string; 
-    int stop_token = 8193;
-    bool all_sequences_stopped = false;
-
-    std::vector<std::vector<int>> sequences(4);
-
-    int i = 0;
-    while (!all_sequences_stopped)
-    {
-    samples =  process_logits_and_sample(gf,  mel_transformer_inputs_vector, i);
-    
-    
-    printVector(samples, 2, "samples");
-
-    sample_string = sample_string + ",[";
-
-    int stop_token_count = 0;
-
-    mel_transformer_inputs_vector.clear();
-    for (int c = 0; c < 4; c ++)
-    {
-        if (!(sequences[c].size()>0 && sequences[c][sequences[c].size()-1] == stop_token))
-        {
-            sequences[c].push_back(samples[c]);
-        }
-        if (samples[c] ==stop_token)
-        {
-            stop_token_count += 1;
-        }
-        mel_transformer_inputs_vector.push_back(samples[c]);
-        sample_string = sample_string  + std::to_string(samples[c]) + ',';
-    }
-    if (stop_token_count == 4)
-    {
-        all_sequences_stopped = true;
-    }
-    sample_string = sample_string + "]";
-
-    ggml_allocr_reset(allocr);
-    buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
-    allocr = ggml_allocr_new_from_buffer(buf_compute);
-    gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens, false, tokens.size() + 2 + i, i+2);
-    ggml_allocr_alloc_graph(allocr, gf);
-    std::cout << "reached computing time" << std::endl;
-    ggml_backend_graph_compute(model.backend, gf);
-    i+= 1;
-    }
-
-    for (int i =0; i < gf->n_nodes; i ++)
-    {
-        ggml_tensor * test = gf->nodes[i];
-        if (std::string(test->name) != "fixedembedding" )
+        
+        
+        
+         if (filter_flag && std::string(test->name) != filter )
         {
             continue;
         }
@@ -1704,8 +1751,196 @@ int main(int argc, char ** argv) {
 
     }
 
+}
+
+
+
+/*
+ 
+ ███╗   ███╗ █████╗ ██╗███╗   ██╗
+ ████╗ ████║██╔══██╗██║████╗  ██║
+ ██╔████╔██║███████║██║██╔██╗ ██║
+ ██║╚██╔╝██║██╔══██║██║██║╚██╗██║
+ ██║ ╚═╝ ██║██║  ██║██║██║ ╚████║
+ ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
+                                 
+ 
+*/
+
+int main(int argc, char ** argv) {
+
+    std::cout << "hello world" << std::endl;
+    
+
+    
+    //std::uniform_real_distribution<float> distribution(0.0, 1.0);
+    /*
+    std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+        std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+    std::cout << distribution(generator) << std::endl;
+    */
+    gpt_vocab vocab;
+    gpt_vocab_init("../examples/tortoise/tokenizer.json", vocab);
+    
+    std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
+    //std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
+    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
+
+    //std::cout << tokens.size() << std::endl;
+    //exit(0);
+
+    for (int i =0; i < tokens.size(); i ++)
+    {
+        std::cout << tokens[i] << std::endl;
+    }   
+    //todo see why this tokenization doesn't match the tokenization produced by tortoise-tts (tortoise tts one does not always use the token corresponding to the most characters)
+
+
+    ggml_time_init();
+    const int64_t t_main_start_us = ggml_time_us();
+
+
+    int64_t t_load_us = 0;
+
+    std::string file_path = "../examples/tortoise/ggml-model.bin";
+
+
+    autoregressive_model model;
+
+
+
+    // load the model
+    {
+        const int64_t t_start_us = ggml_time_us();
+
+        if (!autoregressive_model_load(file_path, model)) {
+            fprintf(stderr, "%s: failed to load model from '%s'\n", __func__, file_path.c_str());
+            return 1;
+        }
+
+        t_load_us = ggml_time_us() - t_start_us;
+
+    }
+
+    std::cout << "completed" << std::endl;
+
+
+    std::vector<int> mel_transformer_inputs_vector = std::vector<int>();
+    mel_transformer_inputs_vector.resize((tokens.size() + 2) * 4);
+    //assert(tokens.size() == 16);
+    
+    for (int i = 0; i < mel_transformer_inputs_vector.size(); i ++)
+    {
+        if (i % (tokens.size()+2) == tokens.size()+2-1){
+            mel_transformer_inputs_vector[i] = 8192;
+        }
+        else{
+            mel_transformer_inputs_vector[i] = 1;
+        }
+    }
+
+
+
+    ggml_backend_buffer_t buf_compute;
+
+    struct ggml_allocr * allocr = NULL;
+    // allocate the compute buffer
+
+    // alignment required by the backend
+    size_t align = ggml_backend_get_alignment(model.backend);
+    std::cout << "alignment" << std::endl;
+    std::cout << align << std::endl;
+    allocr = ggml_allocr_new_measure(align);
+    std::cout << "align created" << std::endl;
+
+    // create the worst case graph for memory usage estimation
+    //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
+    //int n_past = model.hparams.n_ctx - n_tokens;
+    ggml_allocr_reset(allocr);
+    struct ggml_cgraph * gf = autoregressive_graph(model, allocr, mel_transformer_inputs_vector, tokens, true, 0,0);
+    //ggml_graph_print(gf);
+
+    std::cout << "graph created" << std::endl;
+    // compute the required memory
+    size_t mem_size = ggml_allocr_alloc_graph(allocr, gf);
+
+    // recreate the allocator with the required memory
+    ggml_allocr_reset(allocr);
+    buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
+    allocr = ggml_allocr_new_from_buffer(buf_compute);
+    gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens, true, 0,0);
+    ggml_allocr_alloc_graph(allocr, gf);
+    std::cout << "reached computing time" << std::endl;
+    ggml_backend_graph_compute(model.backend, gf);
+    //ggml_graph_print(gf);
+    std::vector<int> samples;
+    
+    std::string sample_string; 
+    int stop_token = 8193;
+    bool all_sequences_stopped = false;
+
+    std::vector<std::vector<int>> sequences(4);
+
+    int i = 0;
+    while (!all_sequences_stopped)
+    {
+    samples =  process_logits_and_sample(gf,  mel_transformer_inputs_vector, i);
+    
+    
+    printVector(samples, 2, "samples");
+
+    sample_string = sample_string + ",[";
+
+    int stop_token_count = 0;
+
+    mel_transformer_inputs_vector.clear();
+    for (int c = 0; c < 4; c ++)
+    {
+        if (!(sequences[c].size()>0 && sequences[c][sequences[c].size()-1] == stop_token))
+        {
+            sequences[c].push_back(samples[c]);
+        }
+        if (samples[c] ==stop_token)
+        {
+            stop_token_count += 1;
+        }
+        mel_transformer_inputs_vector.push_back(samples[c]);
+        sample_string = sample_string  + std::to_string(samples[c]) + ',';
+    }
+    if (stop_token_count == 4)
+    {
+        all_sequences_stopped = true;
+    }
+    sample_string = sample_string + "]";
+
+    ggml_allocr_reset(allocr);
+    buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
+    allocr = ggml_allocr_new_from_buffer(buf_compute);
+    gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens, false, tokens.size() + 2 + i, i+2);
+    ggml_allocr_alloc_graph(allocr, gf);
+    std::cout << "reached computing time" << std::endl;
+    ggml_backend_graph_compute(model.backend, gf);
+    i+= 1;
+    }
+
+    print_all_tensors(gf, false, true, "gpt2 input");
+
+
+    for (int i = 0; i < 4; i ++)
+    {
+        apply_padding(sequences[i]);
+    }
+
+
     // Iterate through the outer vector
-    for (const auto& inner_vector : sequences) {
+    for (std::vector<int> inner_vector : sequences) {
         // Print the inner vector as a Python list literal
         std::cout << "[";
         for (size_t i = 0; i < inner_vector.size(); ++i) {
@@ -1718,7 +1953,67 @@ int main(int argc, char ** argv) {
     }
 
 
-    //std::cout << sample_string << std::endl;
+
+    mel_transformer_inputs_vector.clear();
+    for (int c = 0; c < 4; c ++)
+    {
+        for (int i = 0; i < 502; i ++)
+        {
+            mel_transformer_inputs_vector.push_back(sequences[c][i]);
+        }
+    }
+
+
+    /*
+    ggml_allocr_reset(allocr);
+    buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
+    allocr = ggml_allocr_new_from_buffer(buf_compute);
+    gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens, true, 0,0);
+    ggml_allocr_alloc_graph(allocr, gf);
+    std::cout << "reached computing time" << std::endl;
+    ggml_backend_graph_compute(model.backend, gf);
+    */
+
+
+
+    ggml_backend_buffer_t latent_buf_compute;
+
+    struct ggml_allocr * latent_allocr = NULL;
+    // allocate the compute buffer
+
+    // alignment required by the backend
+    size_t latent_align = ggml_backend_get_alignment(model.backend);
+    std::cout << "alignment" << std::endl;
+    std::cout << latent_align << std::endl;
+    latent_allocr = ggml_allocr_new_measure(latent_align);
+    std::cout << "align created" << std::endl;
+
+    // create the worst case graph for memory usage estimation
+    //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
+    //int n_past = model.hparams.n_ctx - n_tokens;
+    ggml_allocr_reset(latent_allocr);
+    struct ggml_cgraph * latent_gf = autoregressive_latent_graph(model, latent_allocr, mel_transformer_inputs_vector, tokens);
+    //ggml_graph_print(gf);
+
+    std::cout << "graph created" << std::endl;
+    // compute the required memory
+    size_t latent_mem_size = ggml_allocr_alloc_graph(latent_allocr, latent_gf);
+
+
+
+    ggml_allocr_reset(latent_allocr);
+    latent_buf_compute = ggml_backend_alloc_buffer(model.backend, latent_mem_size);
+    latent_allocr = ggml_allocr_new_from_buffer(latent_buf_compute);
+    latent_gf = autoregressive_latent_graph(model, latent_allocr,mel_transformer_inputs_vector, tokens);
+    ggml_allocr_alloc_graph(latent_allocr, latent_gf);
+    std::cout << "reached computing time" << std::endl;
+    ggml_backend_graph_compute(model.backend, latent_gf);
+
+    std::cout << ":^)" << std::endl;
+
+    print_all_tensors(latent_gf, true, false, "n/a");
+    print_all_tensors(latent_gf, false, false, "n/a");
+
     
     // ggml_graph_print   (gf);
 
