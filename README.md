@@ -1,4 +1,7 @@
-# GGML implementation of tortoise-tts, under construction
+# tortoise.cpp: GGML implementation of tortoise-tts, under construction
+
+![a menacing sea turtle in the ocean; mascot for tortoise.cpp](https://github.com/balisujohn/tortoise.cpp/blob/master/assets/tortoiselogo.png?raw=true)
+
 Implementation status:
 
 Tokenization seems to work, but doesn't exactly match the tokenization tortoise-tts performs, needs work. 
