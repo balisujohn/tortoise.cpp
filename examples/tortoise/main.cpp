@@ -2308,7 +2308,6 @@ int main(int argc, char ** argv) {
     sample_string = sample_string + "]";
 
     ggml_allocr_reset(allocr);
-    buf_compute = ggml_backend_alloc_buffer(model.backend, mem_size);
     allocr = ggml_allocr_new_from_buffer(buf_compute);
     gf = autoregressive_graph(model, allocr,mel_transformer_inputs_vector, tokens, false, tokens.size() + 2 + i, i+2);
     ggml_allocr_alloc_graph(allocr, gf);
@@ -2316,6 +2315,7 @@ int main(int argc, char ** argv) {
     ggml_backend_graph_compute(model.backend, gf);
     i+= 1;
     }
+    ggml_allocr_free(allocr);
 
     print_all_tensors(gf, false, true, "gpt2 input");
 
@@ -2396,24 +2396,24 @@ int main(int argc, char ** argv) {
     std::cout << "reached computing time" << std::endl;
     ggml_backend_graph_compute(model.backend, latent_gf);
 
-    std::cout << ":^)" << std::endl;
 
+    std::cout << "Produced autoregressive latents :^)" << std::endl;
     print_all_tensors(latent_gf, true, true, "cur");
     print_all_tensors(latent_gf, false, true, "cur");
 
-    
-    // ggml_graph_print   (gf);
+    ggml_allocr_free(latent_allocr);
+    ggml_allocr_free(allocr);
 
 
-    //std::cout << (float * )test->data << std::endl;
-    //std::cout <<"test" << std::endl;
-    //std::cout << ggml_get_i32_1d(test,0) << std::endl;
+    ggml_free(model.ctx);
+
+    ggml_backend_buffer_free(model.buffer_w);
+    ggml_backend_buffer_free(buf_compute);
+    ggml_backend_buffer_free(latent_buf_compute);
+
+    ggml_backend_free(model.backend);
 
 
-
-    //fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
-        
-    
 
     return 0;
   
