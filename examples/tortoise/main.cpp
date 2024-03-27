@@ -599,7 +599,7 @@ struct ggml_cgraph * autoregressive_latent_graph(
 
 
 
-    static size_t buf_size = ggml_tensor_overhead()*(100)  + ggml_graph_overhead(); //placeholder big value 
+    static size_t buf_size = ggml_tensor_overhead()*(25 +70*38)  + ggml_graph_overhead(); //placeholder big value 
     static std::vector<uint8_t> buf(buf_size);
 
 
@@ -710,11 +710,397 @@ struct ggml_cgraph * autoregressive_latent_graph(
     struct ggml_tensor * embedding = ggml_add(ctx0,text_embedding, text_position_embedding);
     ggml_set_name(embedding, "final text embedding");
 
-
-
-
-    ggml_build_forward_expand(gf, embedding);
     
+    
+    embedding =   ggml_reshape_4d(ctx0, embedding, 1,4,token_count,1024);
+    mel_embedding =   ggml_reshape_4d(ctx0, mel_embedding, 1,4,mel_token_count/4,1024);
+
+
+    
+    
+    
+    struct ggml_tensor * output = ggml_concat(ctx0, embedding, mel_embedding);
+
+
+    struct ggml_tensor * reshaped_latent = ggml_reshape_1d(ctx0, model.conditioning_latent, 1024);
+
+
+    struct ggml_tensor * repeated_latent = ggml_new_tensor_1d(ctx0,GGML_TYPE_F32, 4 * 1024);
+
+    ggml_allocr_alloc(allocr, repeated_latent);
+
+
+    //repeated_latent = ggml_reshape_4d(ctx0, repeated_latent,1024, 1, 4, 1);
+
+    std::cout << "repeated latent shape" << std::endl;
+    std::cout << repeated_latent->ne[0] << std::endl;
+    std::cout << repeated_latent->ne[1] << std::endl;
+    std::cout << repeated_latent->ne[2] << std::endl;
+    std::cout << repeated_latent->ne[3] << std::endl;
+
+
+    std::cout << "reshaped latent shape" << std::endl;
+    std::cout << reshaped_latent->ne[0] << std::endl;
+    std::cout << reshaped_latent->ne[1] << std::endl;
+    std::cout << reshaped_latent->ne[2] << std::endl;
+    std::cout << reshaped_latent->ne[3] << std::endl;
+
+
+
+    repeated_latent = ggml_repeat(ctx0, reshaped_latent, repeated_latent);
+
+    repeated_latent = ggml_reshape_4d(ctx0, repeated_latent, 1,4,1,1024);
+
+
+
+    output = ggml_concat(ctx0, repeated_latent, output);
+
+
+
+
+
+
+    ggml_set_name(output, "output");
+
+    int test_dimension = output->ne[2];
+    int n_past = 0;
+
+    std::cout << "test dimension: " << test_dimension << std::endl;
+
+    struct ggml_tensor * cur = ggml_reshape_4d(ctx0, output, 1024,test_dimension,4,1); // this nonsense is necessary because when I modified ggml_concat I accidentall flipped the order of the dimensions it expects. This will need to be cleaned up later.
+
+
+    struct ggml_tensor * Qcur;
+    struct ggml_tensor * Kcur;
+    struct ggml_tensor * Vcur;
+    
+    struct ggml_tensor * Q;
+    struct ggml_tensor * K;
+
+    struct ggml_tensor * KQ;
+    struct ggml_tensor * KQ_scaled;
+    struct ggml_tensor * KQ_masked;
+    struct ggml_tensor * KQ_soft_max;
+    struct ggml_tensor * V_transposed;
+    struct ggml_tensor * KQV;
+    struct ggml_tensor * KQV_merged;
+
+    struct ggml_tensor * residual;
+    struct ggml_tensor * feed_forward_residual;
+
+    struct ggml_tensor * test;
+
+    for (int i = 0; i < 30; i++)
+    {
+           
+
+           residual = ggml_cpy(ctx0, cur, ggml_new_tensor_4d(ctx0, GGML_TYPE_F32,1024,test_dimension,4,1));
+           
+           //ggml_build_forward_expand(gf, residual);
+           //layer norm
+           
+           cur = ggml_norm(ctx0, cur, 1e-05);
+
+           ggml_tensor * temp_cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne) );
+
+
+           ggml_set_name(temp_cur, "postnorm");
+           ggml_build_forward_expand(gf, temp_cur);
+            
+
+           ggml_format_name(cur, "l%d.norm", i);
+
+           ggml_tensor * temp_ln_1_weights = ggml_repeat(ctx0,model.layers[i].linear_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+           ggml_set_name(temp_ln_1_weights, "weights");
+           //ggml_build_forward_expand(gf, temp_ln_1_weights);
+
+
+           cur = ggml_mul(ctx0, cur,temp_ln_1_weights); // if you flip the order of this it doesn't work on the second token generation process.TODO why does flipping the order of this break it?
+            
+           
+           cur = ggml_add(ctx0,cur, model.layers[i].linear_1_bias);
+           
+          
+
+
+            //ggml_tensor * temp_weights = ggml_cpy(ctx0, model.layers[i].linear_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].linear_1_weights->ne) );
+            ggml_tensor * temp_bias = ggml_cpy(ctx0, model.layers[i].linear_1_bias, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].linear_1_bias->ne) );
+ 
+          //  if(!fake_inputs)
+           // {
+            //ggml_build_forward_expand(gf, temp_bias);
+            //ggml_set_name(temp_bias, "bias");
+           // return gf;
+           // } 
+
+                
+          
+            // this is implemented as conv1d in pytorch, but it's actually just a affine transformation with
+            // a weight and bias
+            cur = ggml_mul_mat(ctx0,
+                        ggml_reshape_2d( ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,model.layers[i].c_attention_attention_weights)),1024,3072),
+                        cur);
+
+
+            cur = ggml_reshape_4d(ctx0, cur, 3072,test_dimension,4,1);
+
+
+            cur = ggml_add(ctx0,cur,
+                    model.layers[i].c_attention_attention_bias); // worth studying the diffs here, why did I have to remove this repeat for settings where the second dimension is 1?
+            
+            
+            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F16,3,cur->ne));
+            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,3,cur->ne));
+
+            
+
+         
+
+
+
+            //derived from ggml reference gpt-2 implementation
+            Qcur = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, 1024, test_dimension, 4, cur->nb[1], cur->nb[2], 0));
+           
+
+            //Kcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_4d(ctx0, cur, 1024, test_dimension, 4, 1,cur->nb[1], cur->nb[2],cur->nb[3], 1024 * sizeof(float)),0,1,3,2));
+
+            Kcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_3d(ctx0, cur, 1024, test_dimension, 4, cur->nb[1], cur->nb[2], 1024 * sizeof(float)),0,2,1,3));
+            Vcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_3d(ctx0, cur, 1024, test_dimension, 4, cur->nb[1], cur->nb[2], 2048 * sizeof(float)),0,2,1,3));
+
+          //  struct ggml_tensor * k = ggml_view_1d(ctx0, model.memory_key, 1024 * test_dimension * 4 , (ggml_element_size(model.memory_key)* ((i * 404 * 1024 * 4) + ((n_past) * 1024 *4))));
+          //  ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, k));
+            
+          //  struct ggml_tensor * v = ggml_view_1d(ctx0, model.memory_value, 1024 * test_dimension * 4 , (ggml_element_size(model.memory_value)* ((i * 404 * 1024 * 4) + ((n_past) * 1024 *4))));
+          //  ggml_build_forward_expand(gf, ggml_cpy(ctx0, Vcur, v));
+
+
+
+
+            //num heads 16
+            //head dim 64
+          
+            Q =ggml_cont(ctx0,ggml_permute(ctx0,
+                        ggml_reshape_4d(ctx0, Qcur , 64,16,test_dimension,4),
+                        0, 2, 1, 3));
+
+            
+            // this is likely not general and but should work for the first layer, may need generalizing once we reach
+            //the end of the first layer.
+           // K =ggml_cont(ctx0,ggml_permute(ctx0,
+           //             ggml_reshape_4d(ctx0, ggml_view_1d(ctx0, model.memory_key, 1024 * (test_dimension + n_past) * 4 , (ggml_element_size(model.memory_key)* (i * 404 * 1024 * 4) )) , 64,16, 4 , test_dimension + n_past),
+           //             0, 2,3, 1));
+            K =ggml_cont(ctx0,ggml_permute(ctx0,
+                        ggml_reshape_4d(ctx0, Kcur , 64,16,4,test_dimension),
+                        0, 2, 3, 1));
+
+ 
+            V_transposed =ggml_cont(ctx0,ggml_permute(ctx0,
+            ggml_reshape_4d(ctx0, Vcur , 64,16,4,test_dimension),
+            1, 2, 3, 0));
+ 
+          
+
+
+         //   V_transposed = ggml_cont(ctx0,ggml_permute(ctx0,
+         //               ggml_reshape_4d(ctx0, ggml_view_1d(ctx0, model.memory_value, 1024 * (test_dimension + n_past) * 4 , (ggml_element_size(model.memory_value)* (i * 404 * 1024 * 4) )) , 64,16,4,test_dimension+n_past),
+         //               1,2,3,0));
+
+          
+
+            //std::cout << K->ne[0]  << K->ne[1] << K->ne[2]  << K->ne[3] << std::endl;
+            //std::cout << Q->ne[0]  << Q->ne[1] << Q->ne[2]  << Q->ne[3] << std::endl;
+            //std::cout << V_transposed->ne[0]  << V_transposed->ne[1] << V_transposed->ne[2]  << V_transposed->ne[3] << std::endl;
+            KQ = ggml_mul_mat(ctx0, K,Q);
+
+            //std::cout << "KQ shape" << std::endl;
+            //std::cout << KQ->ne[0]  << KQ->ne[1] << KQ->ne[2]  << KQ->ne[3] << std::endl;
+
+        
+                   std::cout << "reached: " << i << std::endl;
+
+          
+            
+
+            //KQ = ggml_reshape_1d(ctx0, KQ, KQ->ne[0]* KQ->ne[1]*KQ->ne[2]*KQ->ne[3]);
+
+            //KQ = ggml_cpy(ctx0, KQ, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,KQ->ne));
+            //KQ = ggml_cpy(ctx0, KQ, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,KQ->ne));
+
+            
+            
+            
+            KQ_scaled = ggml_scale_inplace(ctx0, KQ, ggml_new_f32(ctx0,1.0f/sqrt(float(64))));
+
+
+            KQ_masked = ggml_diag_mask_inf_inplace(ctx0, KQ_scaled, n_past);
+
+
+            KQ_soft_max =  ggml_soft_max_inplace(ctx0, KQ_masked);
+            
+
+            KQV = ggml_mul_mat(ctx0, KQ_soft_max, V_transposed);
+            
+           //KQV = ggml_mul_mat(ctx0, ggml_reshape_4d(ctx0,ggml_cont(ctx0,ggml_reshape_3d(ctx0, KQ_soft_max, test_dimension + n_past,test_dimension + n_past,64)),test_dimension + n_past,test_dimension+n_past,16,4), ggml_reshape_3d(ctx0,V_transposed,n_past + test_dimension, 16,);
+      
+            ggml_set_name(KQ_soft_max, "after KQ");
+            ggml_set_name(V_transposed, "after V");
+
+
+          
+      
+        
+
+           //getting the initial KQV value
+           KQV = ggml_reshape_3d(ctx0, KQV, test_dimension ,64,64);
+           KQV = ggml_permute(ctx0, KQV, 1,0,2,3);
+           KQV = ggml_cont_3d(ctx0, KQV, 64,test_dimension,64);
+           KQV = ggml_reshape_4d(ctx0, KQV, 64,test_dimension,16,4);
+           
+
+           //"merge heads" operation
+           KQV_merged = ggml_permute(ctx0, KQV, 0,2,1,3);
+           KQV_merged = ggml_cont_3d(ctx0, KQV_merged, 1024, test_dimension, 4);
+    
+
+          
+      
+
+
+
+            cur = ggml_mul_mat(ctx0,
+                        ggml_reshape_2d( ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,model.layers[i].c_attention_projection_weights)),1024,1024),
+                        KQV_merged);
+
+
+
+            cur = ggml_add(ctx0,cur,
+                   model.layers[i].c_attention_projection_bias);
+
+
+
+
+            //layer input passthrough
+            //cur = ggml_add(ctx0, cur,residual);
+
+            cur = ggml_add(ctx0, ggml_reshape_1d(ctx0,cur, 1024 * 4 * test_dimension), ggml_reshape_1d(ctx0,residual, 1024 * 4 * test_dimension)); // it's really strange that this is necessary, why does it have different behavior than commented out above 
+            cur = ggml_reshape_4d(ctx0, cur, 1024, test_dimension, 4, 1);
+    
+
+
+            
+
+
+
+
+            feed_forward_residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+
+
+            //layer norm 2
+            cur = ggml_norm(ctx0, cur, 1e-05);
+
+            ggml_format_name(cur, "l%d.norm_2", i);
+
+            ggml_tensor * temp_ln_2_weights = ggml_repeat(ctx0,model.layers[i].linear_2_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+            ggml_set_name(temp_ln_2_weights, "test");
+
+
+            ggml_build_forward_expand(gf,temp_ln_2_weights);
+
+            cur = ggml_mul(ctx0, cur, temp_ln_2_weights);
+            cur = ggml_add(ctx0,cur, model.layers[i].linear_2_bias);
+
+
+
+
+            //  fully connected multi layer perceptron
+            cur = ggml_mul_mat(ctx0,
+                        ggml_reshape_2d( ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,model.layers[i].c_multi_layer_perceptron_fully_connected_weights)),1024,4096),
+                        cur);
+
+
+
+            cur = ggml_add(ctx0,cur, model.layers[i].c_multi_layer_perceptron_fully_connected_bias);
+
+            // gelu
+            cur = ggml_gelu(ctx0, cur);
+
+
+            // mlp fully connected
+            cur = ggml_mul_mat(ctx0,
+                        ggml_reshape_2d( ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,model.layers[i].c_multi_layer_perceptron_projection_weights)),4096,1024),
+                        cur);
+
+
+            cur = ggml_add(ctx0, cur, model.layers[i].c_multi_layer_perceptron_projection_bias);
+
+
+
+            //final residual
+            //another case where I had to flatten before adding to get correct results. Either ggml had a pre-existing bug for batch addition, or one of my modifications introduced it. This will need to be addressed.
+            
+            cur = ggml_add(ctx0, ggml_reshape_1d(ctx0,cur , 1024 *  test_dimension *  4 *  1) , ggml_reshape_1d(ctx0,feed_forward_residual, 1024 *  test_dimension *  4 *  1));
+
+
+            cur = ggml_reshape_4d(ctx0, cur, 1024, test_dimension, 4, 1);
+            //cur = ggml_add(ctx0, cur, feed_forward_residual);
+
+
+            
+        
+
+
+    }
+
+
+
+    cur = ggml_norm(ctx0, cur, 1e-05);
+
+
+    ggml_tensor * temp_final_layer_norm_weights = ggml_repeat(ctx0,model.final_layer_norm_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+
+    ggml_build_forward_expand(gf,temp_final_layer_norm_weights);
+
+
+
+    cur = ggml_mul(ctx0, cur, temp_final_layer_norm_weights);
+    cur = ggml_add(ctx0,cur, model.final_layer_norm_bias);
+
+
+    
+    
+    
+    cur = ggml_norm(ctx0, cur, 1e-05);
+
+    cur = ggml_cont(ctx0,ggml_view_4d(ctx0, cur, 1024, test_dimension-1, 4, 1, cur->nb[1], cur->nb[2], cur->nb[3], (1) * sizeof(float) * 1024 )); 
+
+
+
+    ggml_tensor * temp_language_model_head_layer_norm_weights = ggml_repeat(ctx0,model.language_model_head_layer_norm_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+    ggml_build_forward_expand(gf,temp_language_model_head_layer_norm_weights);
+
+    cur = ggml_mul(ctx0, cur, temp_language_model_head_layer_norm_weights);
+    cur = ggml_add(ctx0,cur, model.language_model_head_layer_norm_bias);
+
+    ggml_tensor * final_output =   ggml_cont(ctx0,ggml_view_4d(ctx0, cur, 1024, token_count, 4, 1, cur->nb[1], cur->nb[2], cur->nb[3], (1) * sizeof(float) * 1024 )); 
+
+    //std::cout << "mel token count: " << mel_token_count << std::endl;
+
+    ggml_tensor * final_output_2 =   ggml_cont(ctx0,ggml_view_4d(ctx0, cur, 1024, (mel_token_count/4)-2, 4, 1, cur->nb[1], cur->nb[2], cur->nb[3], (token_count) * sizeof(float) * 1024 )); 
+
+
+    ggml_set_name(final_output_2, "cur");
+
+
+    ggml_build_forward_expand(gf, final_output_2);
+    
+
 
 
     /*
@@ -1791,10 +2177,11 @@ int main(int argc, char ** argv) {
     //std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
-    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
-
-    //std::cout << tokens.size() << std::endl;
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
+    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,135,198,48,167,158,32,3,2,14,34,51,46,20,175,212,76,2,115,126,25,2,170,29,64,136,3,0,0", ','); //"Congratulations! Autoregressive model complete!"
     //exit(0);
+
+
 
     for (int i =0; i < tokens.size(); i ++)
     {
@@ -2011,8 +2398,8 @@ int main(int argc, char ** argv) {
 
     std::cout << ":^)" << std::endl;
 
-    print_all_tensors(latent_gf, true, false, "n/a");
-    print_all_tensors(latent_gf, false, false, "n/a");
+    print_all_tensors(latent_gf, true, true, "cur");
+    print_all_tensors(latent_gf, false, true, "cur");
 
     
     // ggml_graph_print   (gf);
