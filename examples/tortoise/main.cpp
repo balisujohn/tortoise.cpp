@@ -13,7 +13,7 @@
 #include "common.h"
 #include "common-ggml.h"
 
-#include <cassert>
+#include <assert.h>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -36,7 +36,15 @@ int32_t NUM_RETURN_SEQUENCES = 4; //hardcoding this for now, analagous to "num_r
 std::mt19937 generator(245645656);
 std::uniform_real_distribution<float> distribution(0.0, 1.0);
 
+void localAssert(bool condition)
+{
+    if (!condition)
+    {
+        std::cout << "failure" << std::endl;
+        exit(0);
 
+    }
+}
 
 /*
  
@@ -179,6 +187,14 @@ void save_f32_tensor(ggml_tensor * tensor, std::string path_name)
     ggml_backend_tensor_get(tensor,data_read.data(), 0 ,sizeof(float)* elements);
     stream.write(reinterpret_cast<const char*>( data_read.data() ), elements * sizeof(float));
     stream.close();
+}
+
+
+void extract_latents_to_vector(ggml_tensor * tensor, std::vector<float>  & latents)
+{
+    int elements = tensor->ne[0] * tensor->ne[1] * tensor->ne[2] * tensor->ne[3];
+    latents.resize(elements);
+    ggml_backend_tensor_get(tensor,latents.data(), 0 ,sizeof(float)* elements);
 }
 
 
@@ -2032,6 +2048,75 @@ std::vector<int> process_logits_and_sample(ggml_cgraph * gf, std::vector<int>  &
         return samples;
 }
 
+
+
+
+
+//trims latents to no more than 8 calm tokens at the end
+//the latents are each 1024 x 500, and there is a number equal to the batch size. 
+std::vector<std::vector<float>> trim_latents(std::vector<float> & latents, std::vector<std::vector<int>>  & mel_codes)
+{
+    std::cout << mel_codes.size(); 
+
+    int total_sequence_length = 0;
+    for (int i =0; i < mel_codes.size(); i ++)
+    {
+
+    // Remove first element
+        mel_codes[i].erase(mel_codes[i].begin());
+        
+        // Remove last element
+        mel_codes[i].erase(mel_codes[i].end()-1);
+
+        std::cout << mel_codes[i].size() << std::endl;
+        total_sequence_length += mel_codes[i].size();
+        std::cout << "size" << std::endl;
+        std::cout << mel_codes[i].size() << std::endl;
+        localAssert (mel_codes[i].size() == 500);
+        
+    }
+
+    std::cout <<"reached" << std::endl;
+    std::cout << total_sequence_length << std::endl;
+    std::cout << latents.size() << std::endl;
+    // localAssert (total_sequence_length == latents.size());
+
+
+    std::vector<std::vector<float>> trimmed_latents (mel_codes.size());
+
+
+    for (int i =0 ; i < mel_codes.size(); i ++)
+    {
+        const int offset = i * 500*1024;
+        int calm_tokens = 0;
+        
+        
+        for (int c = 0 ; c < 500; c++)
+        {
+
+            if (mel_codes[i][c] == 83)
+            {
+                calm_tokens += 1;
+            }
+            else{
+                calm_tokens = 0;
+            }
+            if (calm_tokens > 8)
+            {
+                break;
+            }
+            for (int j = 0; j < 1024; j++)
+            {
+            trimmed_latents[i].push_back(latents[offset + (c*1024) + j]);
+            }
+            
+        }
+        std::cout << " " << trimmed_latents[i].size() << " ";
+    }
+    return trimmed_latents;
+}
+
+
 // prints either all leaves from a computational graph, or all the nodes
 void print_all_tensors(struct ggml_cgraph * gf, bool leaves, bool filter_flag, std::string filter){
 
@@ -2178,8 +2263,9 @@ int main(int argc, char ** argv) {
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
-    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,135,198,48,167,158,32,3,2,14,34,51,46,20,175,212,76,2,115,126,25,2,170,29,64,136,3,0,0", ','); //"Congratulations! Autoregressive model complete!"
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,135,198,48,167,158,32,3,2,14,34,51,46,20,175,212,76,2,115,126,25,2,170,29,64,136,3,0,0,255,135,198,48,167,158,32,3,2,14,34,51,46,20,175,212,76,2,115,126,25,2,170,29,64,136,3,0,0", ','); //"Congratulations! Autoregressive model complete!"
     //exit(0);
+    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,42,2,97,60,49,2,63,48,61,2,26,163,2,149,2,68,161,33,2,42,2,33,77,78,16,32,2,58,2,42,2,50,18,125,9,2,80,43,32,2,127,2,106,29,57,33,159,7,2,55,2,204,32,9,2,16,31,54,54,2,26,213,61,2,60,2,136,26,29,242,2,51,2,22,20,95,46,2,42,2,36,54,18,2,46,63,31,137,192,2,73,2,26,245,2,26,50,2,19,46,18,9,2,0,0", ','); // "The United States must not adopt the tactics of the enemy. Means are important, as ends. Crisis makes it tempting to ignore the wise restraints that make men free." - Frank Church
 
 
 
@@ -2398,8 +2484,14 @@ int main(int argc, char ** argv) {
 
 
     std::cout << "Produced autoregressive latents :^)" << std::endl;
-    print_all_tensors(latent_gf, true, true, "cur");
+    //print_all_tensors(latent_gf, true, true, "cur");
     print_all_tensors(latent_gf, false, true, "cur");
+
+    std::vector<float> latents = std::vector<float>();
+
+    extract_latents_to_vector(  latent_gf->nodes[latent_gf->n_nodes -1] , latents);
+
+    
 
     ggml_allocr_free(latent_allocr);
     ggml_allocr_free(allocr);
@@ -2414,7 +2506,35 @@ int main(int argc, char ** argv) {
     ggml_backend_free(model.backend);
 
 
+    std::vector<std::vector<float>> trimmed_latents = trim_latents(latents, sequences);
 
+    std::cout <<"reached2" << std::endl;
+    for (int i = 0; i < trimmed_latents[0].size(); i ++)
+    {
+        if (i < 3 || i > trimmed_latents[0].size() -4)
+        {
+        std::cout << "trimmed latents 1\n" << trimmed_latents[0][i] << std::endl;
+        }
+    }
+    std::cout << "length: " << trimmed_latents[0].size();
+
+    /*
+    std::cout << "sequences" << std::endl;
+
+    // Iterate through the outer vector
+    for (std::vector<int> inner_vector : sequences) {
+        // Print the inner vector as a Python list literal
+        std::cout << "[";
+        for (size_t i = 0; i < inner_vector.size(); ++i) {
+            std::cout << inner_vector[i];
+            if (i < inner_vector.size() - 1) {
+                std::cout << ", ";
+            }
+        }
+        std::cout << "]" << std::endl;
+    }
+    */
+        
     return 0;
   
 }
