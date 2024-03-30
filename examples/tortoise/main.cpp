@@ -1732,6 +1732,61 @@ struct ggml_cgraph * autoregressive_graph(
     
 }
 
+
+/*
+ 
+ ██████╗ ██╗███████╗███████╗██╗   ██╗███████╗██╗ ██████╗ ███╗   ██╗    ███████╗ ██████╗ ██████╗ ██╗    ██╗ █████╗ ██████╗ ██████╗     ██████╗  █████╗ ███████╗███████╗
+ ██╔══██╗██║██╔════╝██╔════╝██║   ██║██╔════╝██║██╔═══██╗████╗  ██║    ██╔════╝██╔═══██╗██╔══██╗██║    ██║██╔══██╗██╔══██╗██╔══██╗    ██╔══██╗██╔══██╗██╔════╝██╔════╝
+ ██║  ██║██║█████╗  █████╗  ██║   ██║███████╗██║██║   ██║██╔██╗ ██║    █████╗  ██║   ██║██████╔╝██║ █╗ ██║███████║██████╔╝██║  ██║    ██████╔╝███████║███████╗███████╗
+ ██║  ██║██║██╔══╝  ██╔══╝  ██║   ██║╚════██║██║██║   ██║██║╚██╗██║    ██╔══╝  ██║   ██║██╔══██╗██║███╗██║██╔══██║██╔══██╗██║  ██║    ██╔═══╝ ██╔══██║╚════██║╚════██║
+ ██████╔╝██║██║     ██║     ╚██████╔╝███████║██║╚██████╔╝██║ ╚████║    ██║     ╚██████╔╝██║  ██║╚███╔███╔╝██║  ██║██║  ██║██████╔╝    ██║     ██║  ██║███████║███████║
+ ╚═════╝ ╚═╝╚═╝     ╚═╝      ╚═════╝ ╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝    ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝     ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝
+                                                                                                                                                                                                                                                                                                                   
+*/
+
+struct ggml_cgraph * diffusion_graph(
+    struct ggml_allocr * allocr,
+    std::vector<float> & latent
+)
+{
+    static size_t buf_size = ggml_tensor_overhead()*(1)  + ggml_graph_overhead();
+    static std::vector<uint8_t> buf(buf_size);
+
+    int latent_length = latent.size()/1024;
+
+
+    struct ggml_init_params params = {
+        /*.mem_size   =*/ buf_size,
+        /*.mem_buffer =*/ buf.data(),
+        /*.no_alloc   =*/ true, // the tensors will be allocated later by ggml_allocr_alloc_graph()
+    };
+
+    struct ggml_context * ctx0 = ggml_init(params);
+
+    struct ggml_cgraph  * gf = ggml_new_graph(ctx0);
+
+   struct ggml_tensor * latent_tensor = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, latent.size());
+
+
+    ggml_allocr_alloc(allocr, latent_tensor);
+    // avoid writing to tensors if we are only measuring the memory usage
+    if (!ggml_allocr_is_measure(allocr)) {
+        ggml_backend_tensor_set(latent_tensor, latent.data(), 0, latent.size()*ggml_element_size(latent_tensor));
+    }
+
+    ggml_build_forward_expand(gf, latent_tensor);
+
+    ggml_free(ctx0);
+
+    return gf;
+
+
+}
+
+
+
+
+
 /*
  
  ██╗  ██╗███████╗██╗     ██████╗ ███████╗██████╗     ███████╗██╗   ██╗███╗   ██╗ ██████╗████████╗██╗ ██████╗ ███╗   ██╗███████╗
@@ -2516,24 +2571,68 @@ int main(int argc, char ** argv) {
         std::cout << "trimmed latents 1\n" << trimmed_latents[0][i] << std::endl;
         }
     }
-    std::cout << "length: " << trimmed_latents[0].size();
 
-    /*
-    std::cout << "sequences" << std::endl;
 
-    // Iterate through the outer vector
-    for (std::vector<int> inner_vector : sequences) {
-        // Print the inner vector as a Python list literal
-        std::cout << "[";
-        for (size_t i = 0; i < inner_vector.size(); ++i) {
-            std::cout << inner_vector[i];
-            if (i < inner_vector.size() - 1) {
-                std::cout << ", ";
-            }
-        }
-        std::cout << "]" << std::endl;
-    }
-    */
+
+
+
+
+
+    int length = trimmed_latents[0].size() / 1024;
+    int output_sequence_length = length * 4 * 24000 / 22050 ;
+
+    std::vector<int> output_shape;
+
+    output_shape.push_back(1);
+    output_shape.push_back(100);
+    output_shape.push_back(output_sequence_length);
+
+    std::cout << "length: " << output_sequence_length;
+
+
+
+
+    ggml_backend_t temp_backend = ggml_backend_cuda_init();
+
+
+    ggml_backend_buffer_t diffusion_buf_compute;
+
+    struct ggml_allocr * diffusion_allocr = NULL;
+    // allocate the compute buffer
+
+    // alignment required by the backend
+    size_t diffusion_align = ggml_backend_get_alignment(temp_backend);
+    std::cout << "alignment" << std::endl;
+    std::cout << diffusion_align << std::endl;
+    diffusion_allocr = ggml_allocr_new_measure(diffusion_align);
+    std::cout << "align created" << std::endl;
+
+    // create the worst case graph for memory usage estimation
+    //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
+    //int n_past = model.hparams.n_ctx - n_tokens;
+    ggml_allocr_reset(diffusion_allocr);
+    struct ggml_cgraph * diffusion_gf = diffusion_graph( diffusion_allocr, trimmed_latents[0]);
+    //ggml_graph_print(gf);
+
+    std::cout << "graph created" << std::endl;
+    // compute the required memory
+    size_t diffusion_mem_size = ggml_allocr_alloc_graph(diffusion_allocr, diffusion_gf);
+
+
+
+    ggml_allocr_reset(diffusion_allocr);
+    diffusion_buf_compute = ggml_backend_alloc_buffer(temp_backend, diffusion_mem_size);
+    diffusion_allocr = ggml_allocr_new_from_buffer(diffusion_buf_compute);
+    diffusion_gf = diffusion_graph( diffusion_allocr, trimmed_latents[0]);
+    ggml_allocr_alloc_graph(diffusion_allocr, diffusion_gf);
+    std::cout << "reached computing time" << std::endl;
+    ggml_backend_graph_compute(temp_backend, diffusion_gf);
+
+
+    print_all_tensors(diffusion_gf, false, false, "cur");
+    print_all_tensors(diffusion_gf, true, false, "cur");
+
+
         
     return 0;
   
