@@ -78,6 +78,15 @@ struct autoregressive_hparams{
 };
 
 
+struct diffusion_hparams{
+    int32_t num_heads;
+    int32_t out_channels;
+};
+
+//these are almost entirely static and unused, I'm not certain they will be necessary at all, they were included because I wasn't sure if they would be necessary.
+// TODO consider which ones should be retained, if any. 
+
+
 /*
  
   ██████╗ ██████╗ ████████╗   ██████╗                             
@@ -172,6 +181,51 @@ struct autoregressive_model{
     ggml_backend_t backend = NULL;
 
 
+
+};
+
+
+/*
+ 
+ ██████╗ ██╗███████╗███████╗██╗   ██╗███████╗██╗ ██████╗ ███╗   ██╗    
+ ██╔══██╗██║██╔════╝██╔════╝██║   ██║██╔════╝██║██╔═══██╗████╗  ██║    
+ ██║  ██║██║█████╗  █████╗  ██║   ██║███████╗██║██║   ██║██╔██╗ ██║    
+ ██║  ██║██║██╔══╝  ██╔══╝  ██║   ██║╚════██║██║██║   ██║██║╚██╗██║    
+ ██████╔╝██║██║     ██║     ╚██████╔╝███████║██║╚██████╔╝██║ ╚████║    
+ ╚═════╝ ╚═╝╚═╝     ╚═╝      ╚═════╝ ╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝    
+                                                                       
+ ████████╗███████╗███╗   ██╗███████╗ ██████╗ ██████╗                   
+ ╚══██╔══╝██╔════╝████╗  ██║██╔════╝██╔═══██╗██╔══██╗                  
+    ██║   █████╗  ██╔██╗ ██║███████╗██║   ██║██████╔╝                  
+    ██║   ██╔══╝  ██║╚██╗██║╚════██║██║   ██║██╔══██╗                  
+    ██║   ███████╗██║ ╚████║███████║╚██████╔╝██║  ██║                  
+    ╚═╝   ╚══════╝╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝                  
+                                                                       
+ ███╗   ███╗ █████╗ ███╗   ██╗██╗███████╗███████╗███████╗████████╗     
+ ████╗ ████║██╔══██╗████╗  ██║██║██╔════╝██╔════╝██╔════╝╚══██╔══╝     
+ ██╔████╔██║███████║██╔██╗ ██║██║█████╗  █████╗  ███████╗   ██║        
+ ██║╚██╔╝██║██╔══██║██║╚██╗██║██║██╔══╝  ██╔══╝  ╚════██║   ██║        
+ ██║ ╚═╝ ██║██║  ██║██║ ╚████║██║██║     ███████╗███████║   ██║        
+ ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝╚═╝     ╚══════╝╚══════╝   ╚═╝        
+*/
+
+struct diffusion_model{
+
+    diffusion_hparams hparams;
+
+
+    struct ggml_tensor * diffusion_conditioning_latent;
+
+
+    std::map<std::string, struct ggml_tensor *> tensors;
+
+
+    struct ggml_context * ctx;
+
+    ggml_backend_buffer_t buffer_w;
+
+
+    ggml_backend_t backend = NULL;
 
 };
 
@@ -591,6 +645,252 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
 
 }
+
+/*
+ 
+ ██████╗ ██╗███████╗███████╗██╗   ██╗███████╗██╗ ██████╗ ███╗   ██╗
+ ██╔══██╗██║██╔════╝██╔════╝██║   ██║██╔════╝██║██╔═══██╗████╗  ██║
+ ██║  ██║██║█████╗  █████╗  ██║   ██║███████╗██║██║   ██║██╔██╗ ██║
+ ██║  ██║██║██╔══╝  ██╔══╝  ██║   ██║╚════██║██║██║   ██║██║╚██╗██║
+ ██████╔╝██║██║     ██║     ╚██████╔╝███████║██║╚██████╔╝██║ ╚████║
+ ╚═════╝ ╚═╝╚═╝     ╚═╝      ╚═════╝ ╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝
+                                                                   
+ ████████╗███████╗███╗   ██╗███████╗ ██████╗ ██████╗               
+ ╚══██╔══╝██╔════╝████╗  ██║██╔════╝██╔═══██╗██╔══██╗              
+    ██║   █████╗  ██╔██╗ ██║███████╗██║   ██║██████╔╝              
+    ██║   ██╔══╝  ██║╚██╗██║╚════██║██║   ██║██╔══██╗              
+    ██║   ███████╗██║ ╚████║███████║╚██████╔╝██║  ██║              
+    ╚═╝   ╚══════╝╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝              
+                                                                   
+ ██╗      ██████╗  █████╗ ██████╗                                  
+ ██║     ██╔═══██╗██╔══██╗██╔══██╗                                 
+ ██║     ██║   ██║███████║██║  ██║                                 
+ ██║     ██║   ██║██╔══██║██║  ██║                                 
+ ███████╗╚██████╔╝██║  ██║██████╔╝                                 
+ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝                                  
+                                                                   
+ 
+*/
+
+// derived from  gpt2_model_load(const std::string & fname, gpt2_model & model, gpt_vocab & vocab, int n_ctx, int n_gpu_layers) {
+bool diffusion_model_load(const std::string & fname, diffusion_model & model)
+{
+    printf("%s: loading model from '%s'\n", __func__, fname.c_str());
+
+    auto fin = std::ifstream(fname, std::ios::binary);
+    if (!fin) {
+        fprintf(stderr, "%s: failed to open '%s'\n", __func__, fname.c_str());
+        return false;
+    }
+
+      // verify magic
+    {
+        uint32_t magic;
+        fin.read((char *) &magic, sizeof(magic));
+        if (magic != GGML_FILE_MAGIC) {
+            fprintf(stderr, "%s: invalid model file '%s' (bad magic)\n", __func__, fname.c_str());
+            return false;
+        }
+    }
+
+    // load hparams
+    {
+        auto & hparams = model.hparams;
+
+
+        int32_t num_heads;
+        int32_t out_channels;
+       
+
+        fin.read((char *) &hparams.num_heads, sizeof(hparams.num_heads));
+        fin.read((char *) &hparams.out_channels, sizeof(hparams.out_channels));
+    
+        printf("%s: num_heads = %d\n", __func__, hparams.num_heads);
+        printf("%s: out_channels = %d\n", __func__, hparams.out_channels);
+
+    
+    }    
+
+    size_t buffer_size = 0;
+
+    buffer_size += 1 * 2048 * ggml_type_sizef(GGML_TYPE_F32); // conditioning latent
+
+
+    printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
+    printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
+
+     struct ggml_init_params params = {
+            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(1),
+            /*.mem_buffer =*/ NULL,
+            /*.no_alloc   =*/ true,
+        };
+
+        std::cout << "lol" << std::endl;
+        model.ctx = ggml_init(params);
+        std::cout << "lol2" << std::endl;
+
+        if (!model.ctx) {
+            fprintf(stderr, "%s: ggml_init() failed\n", __func__);
+            return false;
+        }
+
+
+    // initialize the backend
+#ifdef GGML_USE_CUBLAS
+        fprintf(stderr, "%s: using CUDA backend\n", __func__);
+        model.backend = ggml_backend_cuda_init();
+        std::cout << "created backend" << std::endl;
+        if (!model.backend) {
+            fprintf(stderr, "%s: ggml_backend_cuda_init() failed\n", __func__);
+
+        }
+#endif
+
+#ifdef GGML_USE_METAL
+        fprintf(stderr, "%s: using Metal backend\n", __func__);
+        ggml_metal_log_set_callback(ggml_log_callback_default, nullptr);
+        model.backend = ggml_backend_metal_init();
+        if (!model.backend) {
+            fprintf(stderr, "%s: ggml_backend_metal_init() failed\n", __func__);
+        }
+        
+#endif
+
+        if (!model.backend) {
+            // fallback to CPU backend
+            fprintf(stderr, "%s: using CPU backend\n", __func__);
+            model.backend = ggml_backend_cpu_init();
+        }
+
+        if (!model.backend) {
+            fprintf(stderr, "%s: ggml_backend_cpu_init() failed\n", __func__);
+            return false;
+        }
+
+
+        model.buffer_w = ggml_backend_alloc_buffer(model.backend, buffer_size);
+
+
+        auto & ctx = model.ctx;
+
+        model.diffusion_conditioning_latent = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 2048,1);
+
+        model.tensors["diffusion_conditioning_latent"] = model.diffusion_conditioning_latent;
+
+     
+        {
+        ggml_allocr * alloc = ggml_allocr_new_from_buffer(model.buffer_w);
+
+        size_t total_size = 0;
+
+        bool has_lm_head = false;
+
+        std::vector<char> read_buf;
+
+        while (true) {
+            int32_t n_dims;
+            int32_t length;
+            int32_t ttype;
+
+            fin.read(reinterpret_cast<char *>(&n_dims), sizeof(n_dims));
+            fin.read(reinterpret_cast<char *>(&length), sizeof(length));
+            fin.read(reinterpret_cast<char *>(&ttype),  sizeof(ttype));
+
+            if (fin.eof()) {
+                break;
+            }
+
+            int32_t nelements = 1;
+            int32_t ne[2] = { 1, 1 };
+            for (int i = 0; i < n_dims; ++i) {
+                fin.read(reinterpret_cast<char *>(&ne[i]), sizeof(ne[i]));
+                nelements *= ne[i];
+            }
+            std::cout << "made it here again " << std::endl;
+            std::cout << length << std::endl;
+
+
+            std::string name(length, 0);
+
+
+            std::cout << "made it here again too " << std::endl;
+
+            fin.read(&name[0], length);
+            std::cout << "made it here again too " << std::endl;
+
+            if (model.tensors.find(name) == model.tensors.end()) {
+                fprintf(stderr, "%s: unknown tensor '%s' in model file\n", __func__, name.c_str());
+                return false;
+            }
+
+            auto tensor = model.tensors[name];
+            ggml_set_name(tensor, name.c_str());
+
+            
+            std::cout << ggml_nelements(tensor) << std::endl;
+            std::cout <<nelements << std::endl;
+
+            if (ggml_nelements(tensor) != nelements) {
+                fprintf(stderr, "%s: tensor '%s' has wrong size in model file\n", __func__, name.c_str());
+                return false;
+            }
+
+            if (tensor->ne[0] != ne[0] || tensor->ne[1] != ne[1]) {
+                fprintf(stderr, "%s: tensor '%s' has wrong shape in model file: got [%d, %d], expected [%d, %d]\n",
+                        __func__, name.c_str(), (int) tensor->ne[0], (int) tensor->ne[1], ne[0], ne[1]);
+                return false;
+            }
+
+            // for debugging
+            if (1) {
+                printf("%24s - [%5d, %5d], type = %6s, %6.2f MB, %9zu bytes\n", name.c_str(), ne[0], ne[1], ggml_type_name(ggml_type(ttype)), ggml_nbytes(tensor)/1024.0/1024.0, ggml_nbytes(tensor));
+            }
+
+            const size_t bpe = ggml_type_size(ggml_type(ttype));
+
+            if ((nelements*bpe)/ggml_blck_size(tensor->type) != ggml_nbytes(tensor)) {
+                fprintf(stderr, "%s: tensor '%s' has wrong size in model file: got %zu, expected %zu\n",
+                        __func__, name.c_str(), ggml_nbytes(tensor), nelements*bpe);
+                return false;
+            }
+            std::cout << "made it here" << std::endl;
+            ggml_allocr_alloc(alloc, tensor);
+
+            if (ggml_backend_is_cpu  (model.backend)
+#ifdef GGML_USE_METAL
+                || ggml_backend_is_metal(model.backend)
+#endif
+                ) {
+                // for the CPU and Metal backend, we can read directly into the tensor
+                fin.read(reinterpret_cast<char *>(tensor->data), ggml_nbytes(tensor));
+            } else {
+                // read into a temporary buffer first, then copy to device memory
+                std::cout << "made it here too " << std::endl;
+                read_buf.resize(ggml_nbytes(tensor));
+                fin.read(read_buf.data(), ggml_nbytes(tensor));
+                ggml_backend_tensor_set(tensor, read_buf.data(), 0, ggml_nbytes(tensor));
+                std::cout << "??? " << std::endl;
+
+            }
+
+           
+            total_size += ggml_nbytes(tensor);
+        }
+
+
+
+
+        ggml_allocr_free(alloc);
+        printf("%s: model size  = %8.2f MB\n", __func__, total_size/1024.0/1024.0);
+    }
+
+    fin.close();
+
+    return true;
+
+
+}
+
 
 /*
                                                                                                                                                                                             
@@ -1745,11 +2045,12 @@ struct ggml_cgraph * autoregressive_graph(
 */
 
 struct ggml_cgraph * diffusion_graph(
+    struct diffusion_model & model, 
     struct ggml_allocr * allocr,
     std::vector<float> & latent
 )
 {
-    static size_t buf_size = ggml_tensor_overhead()*(1)  + ggml_graph_overhead();
+    static size_t buf_size = ggml_tensor_overhead()*(6)  + ggml_graph_overhead();
     static std::vector<uint8_t> buf(buf_size);
 
     int latent_length = latent.size()/1024;
@@ -1774,7 +2075,20 @@ struct ggml_cgraph * diffusion_graph(
         ggml_backend_tensor_set(latent_tensor, latent.data(), 0, latent.size()*ggml_element_size(latent_tensor));
     }
 
-    ggml_build_forward_expand(gf, latent_tensor);
+
+    latent_tensor = ggml_reshape_3d(ctx0, latent_tensor, 1024 , latent_length, 1);
+    latent_tensor = ggml_cont(ctx0,ggml_permute(ctx0, latent_tensor, 1,0,2,3));
+
+
+    ggml_tensor * conditioning_scale = ggml_view_1d(ctx0, model.diffusion_conditioning_latent, 1024, 0); 
+    ggml_tensor * conditioning_shift = ggml_view_1d(ctx0, model.diffusion_conditioning_latent, 1024, ggml_element_size(model.diffusion_conditioning_latent) * 1024);
+
+
+
+    ggml_set_name(conditioning_shift, "output");
+
+
+    ggml_build_forward_expand(gf, conditioning_shift);
 
     ggml_free(ctx0);
 
@@ -2298,18 +2612,7 @@ int main(int argc, char ** argv) {
     std::cout << "hello world" << std::endl;
     
 
-    
-    //std::uniform_real_distribution<float> distribution(0.0, 1.0);
-    /*
-    std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-        std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-    std::cout << distribution(generator) << std::endl;
-    */
+
     gpt_vocab vocab;
     gpt_vocab_init("../examples/tortoise/tokenizer.json", vocab);
     
@@ -2592,7 +2895,25 @@ int main(int argc, char ** argv) {
 
 
 
-    ggml_backend_t temp_backend = ggml_backend_cuda_init();
+
+    std::string diffusion_file_path = "../examples/tortoise/ggml-diffusion-model.bin";
+
+
+    diffusion_model dfsn_model;
+
+
+
+    // load the model
+    {
+    if (!diffusion_model_load(diffusion_file_path, dfsn_model)) {
+        fprintf(stderr, "%s: failed to load model from '%s'\n", __func__, diffusion_file_path.c_str());
+        return 1;
+    }
+    }
+
+
+
+    //ggml_backend_t temp_backend = ggml_backend_cuda_init();
 
 
     ggml_backend_buffer_t diffusion_buf_compute;
@@ -2601,7 +2922,7 @@ int main(int argc, char ** argv) {
     // allocate the compute buffer
 
     // alignment required by the backend
-    size_t diffusion_align = ggml_backend_get_alignment(temp_backend);
+    size_t diffusion_align = ggml_backend_get_alignment(dfsn_model.backend);
     std::cout << "alignment" << std::endl;
     std::cout << diffusion_align << std::endl;
     diffusion_allocr = ggml_allocr_new_measure(diffusion_align);
@@ -2611,7 +2932,7 @@ int main(int argc, char ** argv) {
     //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
     //int n_past = model.hparams.n_ctx - n_tokens;
     ggml_allocr_reset(diffusion_allocr);
-    struct ggml_cgraph * diffusion_gf = diffusion_graph( diffusion_allocr, trimmed_latents[0]);
+    struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model,  diffusion_allocr, trimmed_latents[0]);
     //ggml_graph_print(gf);
 
     std::cout << "graph created" << std::endl;
@@ -2621,16 +2942,16 @@ int main(int argc, char ** argv) {
 
 
     ggml_allocr_reset(diffusion_allocr);
-    diffusion_buf_compute = ggml_backend_alloc_buffer(temp_backend, diffusion_mem_size);
+    diffusion_buf_compute = ggml_backend_alloc_buffer(dfsn_model.backend, diffusion_mem_size);
     diffusion_allocr = ggml_allocr_new_from_buffer(diffusion_buf_compute);
-    diffusion_gf = diffusion_graph( diffusion_allocr, trimmed_latents[0]);
+    diffusion_gf = diffusion_graph( dfsn_model, diffusion_allocr, trimmed_latents[0]);
     ggml_allocr_alloc_graph(diffusion_allocr, diffusion_gf);
     std::cout << "reached computing time" << std::endl;
-    ggml_backend_graph_compute(temp_backend, diffusion_gf);
+    ggml_backend_graph_compute(dfsn_model.backend, diffusion_gf);
 
 
-    print_all_tensors(diffusion_gf, false, false, "cur");
-    print_all_tensors(diffusion_gf, true, false, "cur");
+    print_all_tensors(diffusion_gf, false, true, "output");
+    print_all_tensors(diffusion_gf, true, true, "output");
 
 
         
