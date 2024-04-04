@@ -209,12 +209,37 @@ struct autoregressive_model{
  ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝╚═╝     ╚══════╝╚══════╝   ╚═╝        
 */
 
+
+struct latent_conditioner_attention_block{
+    
+    struct ggml_tensor * norm_weight;
+    struct ggml_tensor * norm_bias;
+    
+    struct ggml_tensor * qkv_weight;
+    struct ggml_tensor * qkv_bias;
+
+    struct ggml_tensor * projection_out_weight;
+    struct ggml_tensor * projection_out_bias;
+
+    struct ggml_tensor * relative_position_embeddings_relative_attention_bias_weight; 
+
+};
+
+
+
 struct diffusion_model{
 
     diffusion_hparams hparams;
 
 
     struct ggml_tensor * diffusion_conditioning_latent;
+
+    struct ggml_tensor * latent_conditioner_convolution_weight;
+
+    struct ggml_tensor * latent_conditioner_convolution_bias;
+
+    std::vector<latent_conditioner_attention_block> latent_conditioner_attention_blocks;
+
 
 
     std::map<std::string, struct ggml_tensor *> tensors;
@@ -715,12 +740,28 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
 
     buffer_size += 1 * 2048 * ggml_type_sizef(GGML_TYPE_F32); // conditioning latent
 
+    buffer_size += 1024 * 1024 * 3 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioning weight
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioning bias
+
+    for (int i = 0; i < 4; i++ )
+    {
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner attention block norm weight
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner attention block norm bias
+        buffer_size += 3072 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner key value query weight
+        buffer_size += 3072 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner key value query bias
+        buffer_size += 1024 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner projection out weight
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner projection out bias
+        buffer_size += 16* 32 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner relative position embeddings relative attention bias weight 
+
+    
+    }
+
 
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(1),
+            /*.mem_size   =*/ ggml_tensor_overhead() * (size_t)(3 + 7*4),
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
@@ -774,10 +815,79 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
         auto & ctx = model.ctx;
 
         model.diffusion_conditioning_latent = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 2048,1);
+        model.latent_conditioner_convolution_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3,1024,1024);
+        model.latent_conditioner_convolution_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+
+
+
+        model.latent_conditioner_attention_blocks.resize(1);
+        for (int i = 1; i < 5; i ++)
+        {
+
+            auto & block = model.latent_conditioner_attention_blocks[i];
+
+
+            block.norm_weight = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            block.norm_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            block.qkv_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024, 3072);
+            block.qkv_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 3072);
+            block.projection_out_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,1024);
+            block.projection_out_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            block.relative_position_embeddings_relative_attention_bias_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 16,32);
+
+
+            model.tensors["latent_conditioner." + std::to_string(i) + ".norm.weight"] =  block.norm_weight;
+            model.tensors["latent_conditioner." + std::to_string(i) + ".norm.bias"] =  block.norm_bias;
+            model.tensors["latent_conditioner." + std::to_string(i) + ".qkv.weight"] =  block.qkv_weight;
+            model.tensors["latent_conditioner." + std::to_string(i) + ".qkv.bias"] =  block.qkv_bias;
+            model.tensors["latent_conditioner." + std::to_string(i) + ".proj_out.weight"] =  block.projection_out_weight;
+            model.tensors["latent_conditioner." + std::to_string(i) + ".proj_out.bias"] =  block.projection_out_bias;
+            model.tensors["latent_conditioner." + std::to_string(i) + ".relative_pos_embeddings.relative_attention_bias.weight"] =  block.relative_position_embeddings_relative_attention_bias_weight;
+
+            /*
+
+            buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner attention block norm weight
+            buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner attention block norm bias
+            buffer_size += 3072 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner key value query weight
+            buffer_size += 3072 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner key value query bias
+            buffer_size += 1024 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner projection out weight
+            buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner projection out bias
+            buffer_size += 32* 16 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioner relative position embeddings relative attention bias weight 
+
+
+
+
+
+            struct latent_conditioner_attention_block{
+                
+                struct ggml_tensor * norm_weight;
+                struct ggml_tensor * norm_bias;
+                
+                struct ggml_tensor * qkv_weight;
+                struct ggml_tensor * qkv_bias;
+
+                struct ggml_tensor * projection_out_weight;
+                struct ggml_tensor * projection_out_bias;
+
+                struct ggml_tensor * relative_position_embeddings_relative_attention_bias_weight; 
+
+            };
+            */
+    
+        }
+
+
 
         model.tensors["diffusion_conditioning_latent"] = model.diffusion_conditioning_latent;
+        model.tensors["latent_conditioner.0.bias"] = model.latent_conditioner_convolution_bias;
+        model.tensors["latent_conditioner.0.weight"] = model.latent_conditioner_convolution_weight;
 
      
+
+
+
+
+
         {
         ggml_allocr * alloc = ggml_allocr_new_from_buffer(model.buffer_w);
 
@@ -2551,7 +2661,7 @@ void print_all_tensors(struct ggml_cgraph * gf, bool leaves, bool filter_flag, s
         for (int c = 0; c < elements ; c++)
         {
                 
-            if  (c < 3 || c > elements-4  || c == 2*1024 || c == 1024)
+            if  (c < 3 || c > elements-4 )
             {
             
             std::cout << (test_read.data()[c])<< std::endl;
