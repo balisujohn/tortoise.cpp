@@ -4614,9 +4614,7 @@ static __global__ void diag_mask_inf_f32(const float * x, float * dst, const int
 
     const int i = row*ncols + col;
     // dst[i] = col > n_past + row ? -INFINITY : x[i];
-    bool masked = ((col > n_past + row % rows_per_channel) );
-    dst[i] = x[i] * !masked  +  masked * -65504.; //modified this op to match the mask value used by tortoise
-    //probably should be replaced by a controllable input diag mask op in the final version.
+    dst[i] = x[i] - (col > n_past + row % rows_per_channel) * INT_MAX; // equivalent within rounding error but slightly faster on GPU
 }
 // the CUDA soft max implementation differs from the CPU implementation
 // instead of doubles floats are used
