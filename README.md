@@ -24,14 +24,14 @@ For now, cuda only. To compile:
 ````
 mkdir build
 cd build
-cmake -DGGML_CUBLAS=ON -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.1/bin/nvcc ..
+cmake ..
 make
 ````
 This is tested with Ubuntu 22.04 and cuda 12.0 and a 1070ti
 
 
 # Running
-You will need to place `ggml-model.bin` and `ggml-diffusion-model.bin` in the examples/tortoise.directory to run tortoise.cpp. You can generate the model yourself following the instructions in this tortoise-tts reverse engineering fork here https://github.com/balisujohn/tortoise-reverse-engineering, or download it here https://huggingface.co/balisujohn/tortoise-ggml.
+You will need to place `ggml-model.bin` and `ggml-diffusion-model.bin` in the models directory to run tortoise.cpp. You can generate the model yourself following the instructions in this tortoise-tts reverse engineering fork here https://github.com/balisujohn/tortoise-reverse-engineering, or download it here https://huggingface.co/balisujohn/tortoise-ggml.
 
 
 From the build directory, run:
