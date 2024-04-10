@@ -9,7 +9,8 @@ build-ci-release/
 build-cublas/
 out/
 tmp/
-models/
+models/ggml-diffusion-model.bin
+models/ggml-model.bin
 models-mnt
 
 compile_commands.json
