@@ -2676,19 +2676,11 @@ void print_all_tensors(struct ggml_cgraph * gf, bool leaves, bool filter_flag, s
 
 
 
-/*
- 
- ███╗   ███╗ █████╗ ██╗███╗   ██╗
- ████╗ ████║██╔══██╗██║████╗  ██║
- ██╔████╔██║███████║██║██╔██╗ ██║
- ██║╚██╔╝██║██╔══██║██║██║╚██╗██║
- ██║ ╚═╝ ██║██║  ██║██║██║ ╚████║
- ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
-                                 
- 
-*/
 
-int main(int argc, char ** argv) {
+std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autoregressive(std::string input)
+{
+
+
 
     std::cout << "hello world" << std::endl;
     
@@ -2701,10 +2693,10 @@ int main(int argc, char ** argv) {
     //std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
-    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
+    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,135,198,48,167,158,32,3,2,14,34,51,46,20,175,212,76,2,115,126,25,2,170,29,64,136,3,0,0,255,135,198,48,167,158,32,3,2,14,34,51,46,20,175,212,76,2,115,126,25,2,170,29,64,136,3,0,0", ','); //"Congratulations! Autoregressive model complete!"
     //exit(0);
-    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,42,2,97,60,49,2,63,48,61,2,26,163,2,149,2,68,161,33,2,42,2,33,77,78,16,32,2,58,2,42,2,50,18,125,9,2,80,43,32,2,127,2,106,29,57,33,159,7,2,55,2,204,32,9,2,16,31,54,54,2,26,213,61,2,60,2,136,26,29,242,2,51,2,22,20,95,46,2,42,2,36,54,18,2,46,63,31,137,192,2,73,2,26,245,2,26,50,2,19,46,18,9,2,0,0", ','); // "The United States must not adopt the tactics of the enemy. Means are important, as ends. Crisis makes it tempting to ignore the wise restraints that make men free." - Frank Church
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,42,2,97,60,49,2,63,48,61,2,26,163,2,149,2,68,161,33,2,42,2,33,77,78,16,32,2,58,2,42,2,50,18,125,9,2,80,43,32,2,127,2,106,29,57,33,159,7,2,55,2,204,32,9,2,16,31,54,54,2,26,213,61,2,60,2,136,26,29,242,2,51,2,22,20,95,46,2,42,2,36,54,18,2,46,63,31,137,192,2,73,2,26,245,2,26,50,2,19,46,18,9,2,0,0", ','); // "The United States must not adopt the tactics of the enemy. Means are important, as ends. Crisis makes it tempting to ignore the wise restraints that make men free." - Frank Church
 
 
 
@@ -2734,7 +2726,7 @@ int main(int argc, char ** argv) {
 
         if (!autoregressive_model_load(file_path, model)) {
             fprintf(stderr, "%s: failed to load model from '%s'\n", __func__, file_path.c_str());
-            return 1;
+            exit(1);
         }
 
         t_load_us = ggml_time_us() - t_start_us;
@@ -2851,19 +2843,8 @@ int main(int argc, char ** argv) {
     }
 
 
-    // Iterate through the outer vector
-    for (std::vector<int> inner_vector : sequences) {
-        // Print the inner vector as a Python list literal
-        std::cout << "[";
-        for (size_t i = 0; i < inner_vector.size(); ++i) {
-            std::cout << inner_vector[i];
-            if (i < inner_vector.size() - 1) {
-                std::cout << ", ";
-            }
-        }
-        std::cout << "]" << std::endl;
-    }
 
+    std::cout << "firstseq0size: " << sequences[0].size() << std::endl;
 
 
     mel_transformer_inputs_vector.clear();
@@ -2874,7 +2855,6 @@ int main(int argc, char ** argv) {
             mel_transformer_inputs_vector.push_back(sequences[c][i]);
         }
     }
-
 
     /*
     ggml_allocr_reset(allocr);
@@ -2956,8 +2936,199 @@ int main(int argc, char ** argv) {
         }
     }
 
+    std::cout << "seq0size: " << sequences[0].size() << std::endl;
+
+    std::cout << "sequences" << std::endl;
+    // Iterate through the outer vector
+    for (std::vector<int> inner_vector : sequences) {
+        // Print the inner vector as a Python list literal
+        std::cout << "[";
+        for (size_t i = 0; i < inner_vector.size(); ++i) {
+            std::cout << inner_vector[i];
+            if (i < inner_vector.size() - 1) {
+                std::cout << ", ";
+            }
+        }
+        std::cout << "]" << std::endl;
+    }
 
 
+    return std::make_pair(trimmed_latents, sequences);
+
+}
+
+
+
+/*
+ 
+ ████████╗███████╗███████╗████████╗██╗███╗   ██╗ ██████╗ 
+ ╚══██╔══╝██╔════╝██╔════╝╚══██╔══╝██║████╗  ██║██╔════╝ 
+    ██║   █████╗  ███████╗   ██║   ██║██╔██╗ ██║██║  ███╗
+    ██║   ██╔══╝  ╚════██║   ██║   ██║██║╚██╗██║██║   ██║
+    ██║   ███████╗███████║   ██║   ██║██║ ╚████║╚██████╔╝
+    ╚═╝   ╚══════╝╚══════╝   ╚═╝   ╚═╝╚═╝  ╚═══╝ ╚═════╝ 
+                                                         
+ 
+*/
+
+//thanks gpt3.5!
+std::vector<float> load_f32_vector(const std::string& filename, size_t nBytes) {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Unable to open file " << filename << std::endl;
+        return {};
+    }
+
+    // Calculate number of floats to read based on number of bytes
+    size_t numFloats = nBytes / sizeof(float);
+    std::vector<float> floats(numFloats);
+
+    // Read floats from file
+    file.read(reinterpret_cast<char*>(floats.data()), nBytes);
+
+    file.close();
+
+    return floats;
+}
+
+//thanks gpt3.5 !
+void save_f32_vector(const std::string& filename, const std::vector<std::vector<float>>& vectors) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Unable to open file " << filename << " for writing." << std::endl;
+        return;
+    }
+
+
+    // Write each vector
+    for (const auto& vec : vectors) {
+        size_t numFloats = vec.size();        
+        // Write vector elements
+        file.write(reinterpret_cast<const char*>(vec.data()), numFloats * sizeof(float));
+    }
+
+    file.close();
+}
+
+
+
+
+
+//thanks gpt3.5 !
+bool latent_vectors_match(const std::vector<std::vector<float>>& vec_of_vecs, const std::vector<float>& other_vec) {
+    // Flatten the vector of vectors
+    std::vector<float> flattened;
+    for (const auto& inner_vec : vec_of_vecs) {
+        flattened.insert(flattened.end(), inner_vec.begin(), inner_vec.end());
+    }
+
+    // Check if lengths match
+    if (flattened.size() != other_vec.size()) {
+        std::cout << "size problem" << std::endl;
+        return false;
+    }
+
+    // Check if each entry matches
+    for (int i = 0; i < flattened.size(); i ++)
+    {
+        //std::cout << std::to_string(i) + ": "  << flattened[i]  << " " << other_vec[i] << std::endl;
+        if (flattened[i] != other_vec[i])
+        {
+           return false;
+        }
+    }
+
+    return true;
+}
+
+
+
+bool mel_code_vectors_match(const std::vector<std::vector<int>>& vec1, const std::vector<std::vector<int>>& vec2) {
+    if (vec1.size() != vec2.size()) {
+        return false;
+    }
+
+    for (size_t i = 0; i < vec1.size(); ++i) {
+        if (vec1[i].size() != vec2[i].size()) {
+            std::cout << "size: " << vec1[i].size() << " " << vec2[i].size() << std::endl;
+            return false;
+        }
+
+        for (size_t j = 0; j < vec1[i].size(); ++j) {
+            if (vec1[i][j] != vec2[i][j]) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+
+void test_autoregressive(){
+
+
+    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive("placeholder");
+    
+    std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
+    std::vector<std::vector<int>> sequences = autoregressive_result.second;
+
+    int trimmed_latents_size = 0;
+    for (std::vector<float> trimmed_latent : trimmed_latents){
+        trimmed_latents_size += trimmed_latent.size();
+    }
+
+
+
+    save_f32_vector("../assets/target_trimmed_latents.bin", trimmed_latents);
+    std::vector<float> target_trimmed_latents = load_f32_vector("../assets/target_trimmed_latents.bin" , trimmed_latents_size * sizeof(float)); // 4 is the number of bytes in a float.
+
+    std::vector<std::vector<int>> target_sequences ={{8, 7406, 6450, 1601, 2061, 4389, 4954, 134, 1554, 372, 3666, 1580, 20, 83, 45, 8, 248, 8012, 2483, 7396, 37, 7784, 3008, 1126, 283, 1609, 2376, 2061, 4992, 3330, 1350, 469, 1022, 7005, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248},
+{45, 7005, 5594, 944, 4825, 3487, 4389, 1272, 456, 2068, 4685, 1981, 1656, 1580, 20, 45, 7406, 3386, 3932, 2483, 7683, 6893, 7136, 3221, 3069, 734, 511, 485, 1105, 1805, 4040, 2613, 386, 497, 152, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248},
+{20, 299, 7184, 2968, 3633, 3487, 7358, 1272, 670, 1356, 670, 372, 1511, 1970, 8, 20, 45, 7005, 1293, 655, 2681, 7824, 779, 7746, 758, 1417, 734, 5124, 1167, 4879, 815, 1327, 2793, 4726, 3899, 1000, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248},
+{8, 7406, 5978, 1601, 3487, 6693, 3893, 2603, 1100, 612, 7403, 4584, 8, 20, 45, 83, 45, 299, 2867, 1197, 230, 2071, 2283, 6497, 7683, 1084, 4357, 492, 1265, 1835, 2021, 989, 2929, 2159, 1374, 7005, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248}};
+
+    if (!mel_code_vectors_match(sequences, target_sequences))
+    {
+        std::cout << "token sequence mismatch" << std::endl;
+        exit(1);
+    }
+
+    if (!latent_vectors_match(trimmed_latents, target_trimmed_latents))
+    {
+        std::cout << "trimmed latent mismatch" << std::endl;
+        exit(1);
+    }
+
+    std::cout << "AUTOREGRESSIVE TEST SUCCESS!" << std::endl;
+
+}
+
+
+
+
+/*
+ 
+ ███╗   ███╗ █████╗ ██╗███╗   ██╗
+ ████╗ ████║██╔══██╗██║████╗  ██║
+ ██╔████╔██║███████║██║██╔██╗ ██║
+ ██║╚██╔╝██║██╔══██║██║██║╚██╗██║
+ ██║ ╚═╝ ██║██║  ██║██║██║ ╚████║
+ ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
+                                 
+ 
+*/
+
+int main(int argc, char ** argv) {
+
+    test_autoregressive();
+    exit(0);
+
+    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive("placeholder");
+
+
+    std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
+    std::vector<std::vector<int>> sequences = autoregressive_result.second;
 
 
 
@@ -2988,7 +3159,7 @@ int main(int argc, char ** argv) {
     {
     if (!diffusion_model_load(diffusion_file_path, dfsn_model)) {
         fprintf(stderr, "%s: failed to load model from '%s'\n", __func__, diffusion_file_path.c_str());
-        return 1;
+        exit(1);
     }
     }
 
