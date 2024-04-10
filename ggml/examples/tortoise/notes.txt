@@ -1,0 +1,92 @@
+https://github.com/ggerganov/ggml/blob/master/src/ggml-cuda.cu
+Where ggml seems to have actual cuda implementations of stuff
+
+
+
+cmake command for cuda:
+
+
+cd into build
+cmake -DGGML_CUBLAS=ON -DCMAKE_CUDA_COMPILER=/usr/bin/nvcc ..
+make
+
+
+to run 
+
+build/bin/tortoise
+
+for running gpt2 for comparison
+
+ ./bin/gpt-2 -m ../examples/gpt-2/models/gpt-2-117M/ggml-model.bin -p "This is an example"
+
+for printing the ggml graph:
+    
+ggml_graph_print(gf);
+
+
+
+
+current status:
+
+
+11/11/2023
+
+need to look at how pytorch actually does the 1d convolution
+look at input and output shapes, then see if we can get the same behavior. 
+It seems like we are able to load both the weight and bias tensors, but there is a failure in the process of 
+
+11/19/2023
+
+seems like we can start from text embedding, working on getting embedding retrieval working in ggml. We will load the auto-conditioning tensor instead of calculating it, because it does not depend on 
+the text the user provides.
+
+We are trying to use ggml_get_rows, to retrieve the embeddings for some particular tokens. When trying to print out the resulting tensor, we are getting a seg fault.
+
+
+11/29/2023
+inference is yielding numbers with get_rows, but the numbers aren't matching, the problem seems to be upstream of get_rows in the model weights load, but there
+may also be a problem in get_rows since it doesn't seem like the embeddings match even the loaded embeddings which dont seem to match what they should be 
+
+11/30/2023
+numbers from get_rows are now matching, I was calling torch.save() before loading the state dict so random weights were getting saved. The next step is getting the position embedding
+and also making sure the numbers match there, then the combined embedding and making sure the numbers match there. 
+
+
+12/2/2023
+text position embedding now also working and successfulyl combining with normal text embedding, onto next steps
+
+12/3/2023
+I need to concat the fixed conditioning latent with the embedding tesnor, it seems like ggml doesn't support the ggml_concat op for 
+cuda, so I will try adding this op. 
+
+12/11/2023
+I added a  cuda implementation for the ggml concat op, so that's my first custom kernel, it's not working on euler for some reason so here is the output
+of nvidia-smi on my machine, I will try to see if I can get conditions to match this on the euler machine:
+
+Mon Dec 11 11:09:04 2023       
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 525.147.05   Driver Version: 525.147.05   CUDA Version: 12.0     |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|                               |                      |               MIG M. |
+|===============================+======================+======================|
+|   0  NVIDIA GeForce ...  Off  | 00000000:2E:00.0 Off |                  N/A |
+|  0%   37C    P0    46W / 180W |    354MiB /  8192MiB |     10%      Default |
+|                               |                      |                  N/A |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                                  |
+|  GPU   GI   CI        PID   Type   Process name                  GPU Memory |
+|        ID   ID                                                   Usage      |
+|=============================================================================|
+|    0   N/A  N/A      1817      G   /usr/lib/xorg/Xorg                165MiB |
+|    0   N/A  N/A      2148      G   /usr/bin/gnome-shell               74MiB |
+|    0   N/A  N/A      2585      G   ...0/usr/lib/firefox/firefox       96MiB |
++-----------------------------------------------------------------------------+
+
+02/22/2024 
+
+The current problem with with mul in layernorm 1. Something fishy is happening where it's duplicating the sample 1024 row 4 times when the first and last should be the same and the middle two rows should be different.
+This will require further debugging. 

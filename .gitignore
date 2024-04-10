@@ -13,6 +13,9 @@ models/ggml-diffusion-model.bin
 models/ggml-model.bin
 models-mnt
 
+ggml/examples/tortoise/ggml-diffusion-model.bin
+ggml/examples/tortoise/ggml-model.bin
+
 compile_commands.json
 CMakeSettings.json
 .vs/
