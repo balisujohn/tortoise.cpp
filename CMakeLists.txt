@@ -6,7 +6,7 @@ project("tortoise")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_executable(tortoise main.cpp common.cpp common-ggml.cpp)
+add_executable(tortoise main.cpp common.cpp)
 
 set(GGML_CUBLAS ON)
 set(GGML_USE_CUBLAS ON)
