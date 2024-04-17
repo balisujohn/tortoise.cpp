@@ -1052,15 +1052,6 @@ struct ggml_cgraph * autoregressive_latent_graph(
 
     std::cout << "token count" << token_count << std::endl;
 
-   /*
-    // avoid writing to tensors if we are only measuring the memory usage
-    if (!ggml_allocr_is_measure(allocr)) {
-        for (int i =0; i < 4; i ++)
-        {
-            ggml_backend_tensor_set(input, tokens.data(), i * token_count * ggml_element_size(input) , token_count*ggml_element_size(input));
-        }
-    }
-    */
 
 
     //ggml_set_name(input, "text input codes");
@@ -1071,19 +1062,7 @@ struct ggml_cgraph * autoregressive_latent_graph(
    
    ggml_set_name(input_position, "input_position");
 
-   /*
-    if (!ggml_allocr_is_measure(allocr)) {
-            for (int i = 0; i < 4; i ++)
-            {
-                for (int c =0; c < token_count; c++)
-                {
-                int32_t v = c;
-                ggml_backend_tensor_set(input_position, &v, ((i * token_count)+c) * sizeof(int32_t), sizeof(v));
-                }
-            
-            }
-    }
-    */
+
 
 
 
@@ -1091,14 +1070,7 @@ struct ggml_cgraph * autoregressive_latent_graph(
 
     ggml_set_name(mel_codes, "input_mel_tokens");
 
-    /*
-    if (!ggml_allocr_is_measure(allocr)) {
-        for (int i = 0; i < mel_token_count; ++i) {
-            int32_t v = mel_transformer_inputs_vector[i];
-            ggml_backend_tensor_set(mel_codes, &v, i*sizeof(int32_t), sizeof(v));
-        }
-    }
-    */
+ 
 
    // ggml_tensor * temp_cur = ggml_cpy(ctx0, mel_codes, ggml_new_tensor(ctx0, GGML_TYPE_I32,4,mel_codes->ne) );
 
@@ -1115,19 +1087,6 @@ struct ggml_cgraph * autoregressive_latent_graph(
     struct ggml_tensor * mel_position = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, mel_token_count);
     ggml_set_name(mel_position, "input_mel_position");
 
-    /*
-    if (!ggml_allocr_is_measure(allocr)) {
-            for (int i = 0; i < 4; i ++)
-            {
-                for (int c =0; c < mel_token_count / 4; c++)
-                {
-                int32_t v = c;
-                ggml_backend_tensor_set(mel_position, &v, ((i * (mel_token_count/4))+c) * sizeof(int32_t), sizeof(v));
-                }
-            
-            }
-    }
-    */
 
     struct ggml_tensor * mel_position_embedding = ggml_get_rows(ctx0, model.mel_position_embedding_weights,mel_position);
 
@@ -1671,25 +1630,10 @@ struct ggml_cgraph * autoregressive_graph(
 
     ggml_set_name(input, "input_tokens");
 
-    /*
-    // avoid writing to tensors if we are only measuring the memory usage
-    if (!ggml_allocr_is_measure(allocr)) {
-        ggml_backend_tensor_set(input, tokens.data(), 0, token_count*ggml_element_size(input));
-    }
-    */
-
+    
     struct ggml_tensor * position = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, token_count);
 
     ggml_set_name(position, "input_position");
-
-    /*
-    if (!ggml_allocr_is_measure(allocr)) {
-        for (int i = 0; i < token_count; ++i) {
-            int32_t v = i;
-            ggml_backend_tensor_set(position, &v, i*sizeof(int32_t), sizeof(v));
-        }
-    }
-    */
 
     ggml_tensor * gpt2_input;
 
@@ -1714,16 +1658,7 @@ struct ggml_cgraph * autoregressive_graph(
 
         ggml_set_name(mel_transformer_inputs, "input_mel_tokens");
         std::cout << "tensor set reached" << std::endl;
-        /*
-        if (!ggml_allocr_is_measure(allocr)) {
-            for (int i = 0; i < 4*mel_transformer_inputs_vector.size(); ++i) {
-                int v = mel_transformer_inputs_vector[i];
-                ggml_backend_tensor_set(mel_transformer_inputs, &v, i*sizeof(int32_t), sizeof(v));
-            
-            }
-
-        }
-        */
+       
 
         
         mel_transformer_inputs = ggml_reshape_2d(ctx0, mel_transformer_inputs, 4, mel_transformer_inputs_vector.size()/4); 
@@ -1735,14 +1670,7 @@ struct ggml_cgraph * autoregressive_graph(
 
         ggml_set_name(truncated_mel_transformer_inputs, "input_mel_tokens_truncated");
 
-        /*
-        if (!ggml_allocr_is_measure(allocr)) {
-            int32_t start_mel_token = 8192;
-            for (int i = 0; i < 4; ++i) {
-                ggml_backend_tensor_set(truncated_mel_transformer_inputs, &start_mel_token, i*sizeof(int32_t), sizeof(start_mel_token));
-            }
-        }
-        */
+      
 
         struct ggml_tensor * mel_embedding = ggml_get_rows(ctx0, model.mel_embedding_weights,truncated_mel_transformer_inputs);
 
@@ -1750,20 +1678,11 @@ struct ggml_cgraph * autoregressive_graph(
         struct ggml_tensor * mel_position = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, 1);
 
         ggml_set_name(mel_position, "input_mel_position");
-        /*
-        if (!ggml_allocr_is_measure(allocr)) {
-                int32_t v = 0;
-                ggml_backend_tensor_set(mel_position, &v, 0, sizeof(v));
-        }
-        */
+       
 
         struct ggml_tensor * mel_position_embedding = ggml_get_rows(ctx0, model.mel_position_embedding_weights,mel_position);
 
         mel_embedding = ggml_add(ctx0,mel_embedding, mel_position_embedding);
-    
-        //mel_embedding = ggml_permute(ctx0, mel_embedding, 0,2,1,3);
-        
-        //mel_embedding = ggml_reshape_4d(ctx0, mel_embedding, 1, 4, 1, 1024);
 
         ggml_set_name(mel_embedding, "mel_embedding");
 
@@ -1813,17 +1732,6 @@ struct ggml_cgraph * autoregressive_graph(
 
         ggml_set_name(mel_transformer_inputs, "input_mel_tokens");
 
-
-        /*
-        if (!ggml_allocr_is_measure(allocr)) {
-            for (int i = 0; i < 4; ++i) {
-                int v = mel_transformer_inputs_vector[i];
-                ggml_backend_tensor_set(mel_transformer_inputs, &v, i*sizeof(int32_t), sizeof(v));
-            
-            }
-
-        }
-        */
         
         mel_transformer_inputs = ggml_reshape_2d(ctx0, mel_transformer_inputs, 4, 1); 
 
@@ -1835,33 +1743,17 @@ struct ggml_cgraph * autoregressive_graph(
 
         ggml_set_name(fixed_embedding_ids, "input_fixed_embedding_ids");
 
-        /*
-        if (!ggml_allocr_is_measure(allocr)) {
-            int v = fixed_position;
-            ggml_backend_tensor_set(fixed_embedding_ids, &v, 0, sizeof(v));
-
-        }
-        */
-
         ggml_tensor * fixed_embedding = ggml_get_rows(ctx0, model.mel_position_embedding_weights,fixed_embedding_ids);
 
         ggml_set_name(fixed_embedding, "input_fixed embedding");
        
-       /* if(!fake_inputs && n_past ==19)
-        {
-                ggml_build_forward_expand(gf, fixed_embedding);
-                ggml_set_name(fixed_embedding, "fixedembedding");
-                return gf;
-        } */
+    
 
         gpt2_input =  ggml_add(ctx0,mel_embedding, fixed_embedding);
         gpt2_input = ggml_cont(ctx0,ggml_permute(ctx0, gpt2_input, 0,2,1,3));
         ggml_set_name(gpt2_input, "gpt2 input");
 
-        //ggml_build_forward_expand(gf, gpt2_input);
-        //ggml_free(ctx0);
-        //return gf;
-
+      
     }
 
 
