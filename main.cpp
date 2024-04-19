@@ -728,7 +728,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
                                                                    
  
 */
-/*
+
 // derived from  gpt2_model_load(const std::string & fname, gpt2_model & model, gpt_vocab & vocab, int n_ctx, int n_gpu_layers) {
 bool diffusion_model_load(const std::string & fname, diffusion_model & model)
 {
@@ -892,7 +892,8 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
 
 
         {
-        ggml_allocr * alloc = ggml_allocr_new_from_buffer(model.buffer_w);
+        //ggml_allocr * alloc = ggml_allocr_new_from_buffer(model.buffer_w);
+        model.buffer_w = ggml_backend_alloc_ctx_tensors(ctx, model.backend);
 
         size_t total_size = 0;
 
@@ -900,7 +901,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
 
         std::vector<char> read_buf;
 
-        while (true) {
+     while (true) {
             int32_t n_dims;
             int32_t length;
             int32_t ttype;
@@ -919,17 +920,9 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
                 fin.read(reinterpret_cast<char *>(&ne[i]), sizeof(ne[i]));
                 nelements *= ne[i];
             }
-            std::cout << "made it here again " << std::endl;
-            std::cout << length << std::endl;
-
 
             std::string name(length, 0);
-
-
-            std::cout << "made it here again too " << std::endl;
-
             fin.read(&name[0], length);
-            std::cout << "made it here again too " << std::endl;
 
             if (model.tensors.find(name) == model.tensors.end()) {
                 fprintf(stderr, "%s: unknown tensor '%s' in model file\n", __func__, name.c_str());
@@ -938,11 +931,6 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
 
             auto tensor = model.tensors[name];
             ggml_set_name(tensor, name.c_str());
-
-            
-            std::cout << ggml_nelements(tensor) << std::endl;
-            std::cout <<nelements << std::endl;
-
             if (ggml_nelements(tensor) != nelements) {
                 fprintf(stderr, "%s: tensor '%s' has wrong size in model file\n", __func__, name.c_str());
                 return false;
@@ -955,7 +943,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
             }
 
             // for debugging
-            if (1) {
+            if (0) {
                 printf("%24s - [%5d, %5d], type = %6s, %6.2f MB, %9zu bytes\n", name.c_str(), ne[0], ne[1], ggml_type_name(ggml_type(ttype)), ggml_nbytes(tensor)/1024.0/1024.0, ggml_nbytes(tensor));
             }
 
@@ -966,34 +954,23 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
                         __func__, name.c_str(), ggml_nbytes(tensor), nelements*bpe);
                 return false;
             }
-            std::cout << "made it here" << std::endl;
-            ggml_allocr_alloc(alloc, tensor);
 
-            if (ggml_backend_is_cpu  (model.backend)
-#ifdef GGML_USE_METAL
-                || ggml_backend_is_metal(model.backend)
-#endif
-                ) {
-                // for the CPU and Metal backend, we can read directly into the tensor
+            if (ggml_backend_buffer_is_host(model.buffer_w)) {
+                // for some backends such as CPU and Metal, the tensor data is in system memory and we can read directly into it
                 fin.read(reinterpret_cast<char *>(tensor->data), ggml_nbytes(tensor));
             } else {
                 // read into a temporary buffer first, then copy to device memory
-                std::cout << "made it here too " << std::endl;
                 read_buf.resize(ggml_nbytes(tensor));
                 fin.read(read_buf.data(), ggml_nbytes(tensor));
                 ggml_backend_tensor_set(tensor, read_buf.data(), 0, ggml_nbytes(tensor));
-                std::cout << "??? " << std::endl;
-
             }
 
-           
+    
+
             total_size += ggml_nbytes(tensor);
         }
 
 
-
-
-        ggml_allocr_free(alloc);
         printf("%s: model size  = %8.2f MB\n", __func__, total_size/1024.0/1024.0);
     }
 
@@ -1003,7 +980,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
 
 
 }
-*/
+
 
 /*
                                                                                                                                                                                             
@@ -2146,38 +2123,40 @@ struct ggml_cgraph * autoregressive_graph(
  ╚═════╝ ╚═╝╚═╝     ╚═╝      ╚═════╝ ╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝    ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝     ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝
                                                                                                                                                                                                                                                                                                                    
 */
-/*
+
 
 struct ggml_cgraph * diffusion_graph(
     struct diffusion_model & model, 
-    struct ggml_allocr * allocr,
     std::vector<float> & latent
 )
 {
-    static size_t buf_size = ggml_tensor_overhead()*(6)  + ggml_graph_overhead();
+   static size_t buf_size = ggml_tensor_overhead()*GPT2_MAX_NODES + ggml_graph_overhead_custom(GPT2_MAX_NODES, false);
     static std::vector<uint8_t> buf(buf_size);
+
+    struct ggml_init_params params = {
+        /*.mem_size   =*/ buf_size,
+        /*.mem_buffer =*/ buf.data(),
+        /*.no_alloc   =*/ true, // the tensors will be allocated later by ggml_gallocr_alloc_graph()
+    };
 
     int latent_length = latent.size()/1024;
 
 
-    struct ggml_init_params params = {
-       buf_size, // buf size
-        buf.data(), //mem buffer
-       true, // (no alloc)the tensors will be allocated later by ggml_allocr_alloc_graph()
-    };
-
     struct ggml_context * ctx0 = ggml_init(params);
 
-    struct ggml_cgraph  * gf = ggml_new_graph(ctx0);
+    struct ggml_cgraph  * gf = ggml_new_graph_custom(ctx0, GPT2_MAX_NODES, false);
 
    struct ggml_tensor * latent_tensor = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, latent.size());
 
+    ggml_set_name(latent_tensor, "input_latent_tensor");
 
+    ggml_build_forward_expand(gf, latent_tensor);
+    /*
     // avoid writing to tensors if we are only measuring the memory usage
     if (!ggml_allocr_is_measure(allocr)) {
         ggml_backend_tensor_set(latent_tensor, latent.data(), 0, latent.size()*ggml_element_size(latent_tensor));
     }
-
+    */
 
     latent_tensor = ggml_reshape_3d(ctx0, latent_tensor, 1024 , latent_length, 1);
     latent_tensor = ggml_cont(ctx0,ggml_permute(ctx0, latent_tensor, 1,0,2,3));
@@ -2187,11 +2166,33 @@ struct ggml_cgraph * diffusion_graph(
     ggml_tensor * conditioning_shift = ggml_view_1d(ctx0, model.diffusion_conditioning_latent, 1024, ggml_element_size(model.diffusion_conditioning_latent) * 1024);
 
 
+    ggml_tensor * float_16_latent_conditioner_convolution_weight =   ggml_cpy(ctx0, model.latent_conditioner_convolution_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.latent_conditioner_convolution_weight->ne));
 
-    ggml_set_name(conditioning_shift, "output");
+
+    ggml_tensor * cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_latent_conditioner_convolution_weight, latent_tensor, 1,1,1 ));
 
 
-    ggml_build_forward_expand(gf, conditioning_shift);
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.latent_conditioner_convolution_bias)));
+
+
+    //latent conditioner attention blocks
+
+    for (int i = 0; i < 1; i ++)
+    {
+
+
+
+
+    }
+
+
+    ggml_set_name(cur, "output");
+
+
+    ggml_build_forward_expand(gf, cur);
 
     ggml_free(ctx0);
 
@@ -2200,7 +2201,7 @@ struct ggml_cgraph * diffusion_graph(
 
 }
 
-*/
+
 
 
 
@@ -2972,7 +2973,6 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
     
 
 
-    ggml_backend_buffer_t latent_buf_compute;
 
     ggml_gallocr_t latent_allocr = NULL;
     // allocate the compute buffer
@@ -2985,10 +2985,7 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
     
 
     std::cout << "graph created" << std::endl;
-    // compute the required memory
-    ggml_gallocr_reserve(latent_allocr, latent_measure_gf);
-    size_t latent_mem_size =  ggml_gallocr_get_buffer_size(allocr, 0);
-    fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, latent_mem_size/1024.0/1024.0);
+    // compute the required memoryautoregresc__, latent_mem_size/1024.0/1024.0);
 
 
 
@@ -3070,8 +3067,6 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
     ggml_free(model.ctx);
 
     ggml_backend_buffer_free(model.buffer_w);
-    ggml_backend_buffer_free(buf_compute);
-    ggml_backend_buffer_free(latent_buf_compute);
 
     ggml_backend_free(model.backend);
 
@@ -3278,12 +3273,11 @@ void test_autoregressive(){
 
 int main(int argc, char ** argv) {
 
-    test_autoregressive();
-    exit(0);
-    
+   // test_autoregressive();
+   
     std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive("placeholder");
-    exit(0);
-    /*
+    //exit(0);
+    
     std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
     std::vector<std::vector<int>> sequences = autoregressive_result.second;
 
@@ -3320,50 +3314,72 @@ int main(int argc, char ** argv) {
     }
     }
 
-
+    std::cout << "reached" << std::endl;
 
     //ggml_backend_t temp_backend = ggml_backend_cuda_init();
 
-
-    ggml_backend_buffer_t diffusion_buf_compute;
-
-    struct ggml_allocr * diffusion_allocr = NULL;
+    ggml_gallocr_t diffusion_allocr = NULL;
     // allocate the compute buffer
 
+    diffusion_allocr = ggml_gallocr_new(ggml_backend_get_default_buffer_type(dfsn_model.backend));  
+
     // alignment required by the backend
-    size_t diffusion_align = ggml_backend_get_alignment(dfsn_model.backend);
-    std::cout << "alignment" << std::endl;
-    std::cout << diffusion_align << std::endl;
-    diffusion_allocr = ggml_allocr_new_measure(diffusion_align);
-    std::cout << "align created" << std::endl;
+  //  size_t diffusion_align = ggml_backend_get_alignment(dfsn_model.backend);
+  //  std::cout << "alignment" << std::endl;
+   // std::cout << diffusion_align << std::endl;
+    //diffusion_allocr = ggml_allocr_new_measure(diffusion_align);
+    //std::cout << "align created" << std::endl;
 
     // create the worst case graph for memory usage estimation
     //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
     //int n_past = model.hparams.n_ctx - n_tokens;
-    ggml_allocr_reset(diffusion_allocr);
-    struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model,  diffusion_allocr, trimmed_latents[0]);
+    //ggml_allocr_reset(diffusion_allocr);
+    struct ggml_cgraph * measure_gf = diffusion_graph( dfsn_model, trimmed_latents[0]);
     //ggml_graph_print(gf);
 
     std::cout << "graph created" << std::endl;
     // compute the required memory
-    size_t diffusion_mem_size = ggml_allocr_alloc_graph(diffusion_allocr, diffusion_gf);
+    size_t diffusion_mem_size = ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
+
+    ggml_gallocr_reserve(diffusion_allocr, measure_gf);
+    size_t mem_size =  ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
+    fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
+
+    struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model, trimmed_latents[0]);
+    ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
 
 
+    struct ggml_tensor * latent_tensor = ggml_graph_get_tensor(diffusion_gf, "input_latent_tensor");      
+           
+    ggml_backend_tensor_set(latent_tensor, trimmed_latents[0].data(), 0, trimmed_latents[0].size()*ggml_element_size(latent_tensor));
 
-    ggml_allocr_reset(diffusion_allocr);
-    diffusion_buf_compute = ggml_backend_alloc_buffer(dfsn_model.backend, diffusion_mem_size);
-    diffusion_allocr = ggml_allocr_new_from_buffer(diffusion_buf_compute);
-    diffusion_gf = diffusion_graph( dfsn_model, diffusion_allocr, trimmed_latents[0]);
-    ggml_allocr_alloc_graph(diffusion_allocr, diffusion_gf);
+    
+    
+    
+    //ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
     std::cout << "reached computing time" << std::endl;
     ggml_backend_graph_compute(dfsn_model.backend, diffusion_gf);
+
 
 
     print_all_tensors(diffusion_gf, false, true, "output");
     print_all_tensors(diffusion_gf, true, true, "output");
 
 
-    */
+
+    
+
+    ggml_gallocr_free(diffusion_allocr);
+
+
+    ggml_free(dfsn_model.ctx);
+
+    
+    ggml_backend_buffer_free(dfsn_model.buffer_w);
+
+    ggml_backend_free(dfsn_model.backend);
+
+    
     return 0;
   
 }
