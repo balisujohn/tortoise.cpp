@@ -856,7 +856,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
         for (int i = 1; i < 5; i ++)
         {
 
-            auto & block = model.latent_conditioner_attention_blocks[i];
+            auto & block = model.latent_conditioner_attention_blocks[i-1];
 
 
             block.norm_weight = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
@@ -2178,11 +2178,35 @@ struct ggml_cgraph * diffusion_graph(
     cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.latent_conditioner_convolution_bias)));
 
 
-    //latent conditioner attention blocks
+   // latent conditioner attention blocks
 
     for (int i = 0; i < 1; i ++)
     {
 
+
+        //group norm
+
+        cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+
+
+        cur = ggml_group_norm(ctx0, cur, 32);
+
+        cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+
+        ggml_format_name(cur, "l%d.norm", i);
+
+        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.latent_conditioner_attention_blocks[i].norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+
+
+        cur = ggml_add(ctx0,cur, model.latent_conditioner_attention_blocks[i].norm_bias);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+        // qkv
 
 
 
