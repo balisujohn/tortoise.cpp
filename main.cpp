@@ -2180,6 +2180,15 @@ struct ggml_cgraph * diffusion_graph(
 
    // latent conditioner attention blocks
 
+
+
+    ggml_tensor * Q;
+    ggml_tensor * K;
+    ggml_tensor * V;
+
+    ggml_tensor * KQ;
+    ggml_tensor * KQ_scaled;
+
     for (int i = 0; i < 1; i ++)
     {
 
@@ -2209,14 +2218,45 @@ struct ggml_cgraph * diffusion_graph(
         // qkv
 
 
+        ggml_tensor * float_16_qkv_weight=   ggml_reshape_3d(ctx0, ggml_cpy(ctx0, model.latent_conditioner_attention_blocks[i].qkv_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.latent_conditioner_attention_blocks[i].qkv_weight->ne)), 1,1024, 3072);
+
+
+        cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_qkv_weight, cur, 1,0,1 ));
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.latent_conditioner_attention_blocks[i].qkv_bias)));
+
+        cur = ggml_reshape_3d(ctx0, cur, latent_length, 192, 16);
+
+        //derived from ggml reference gpt-2 implementation
+        Q = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, latent_length, 64, 16, cur->nb[1], cur->nb[2], 0));
+
+        K = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, latent_length, 64, 16, cur->nb[1], cur->nb[2], latent_length * 64  * ggml_element_size(cur)));
+
+        V = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, latent_length, 64, 16, cur->nb[1], cur->nb[2], latent_length * 128  * ggml_element_size(cur)));
+
+
+        KQ = ggml_mul_mat(ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,K)),ggml_cont(ctx0,ggml_transpose(ctx0,Q)));
+
+
+        KQ_scaled = ggml_scale_inplace(ctx0, KQ, 1.0f/sqrt(float(64)));
+
+
+       // Q =ggml_cont(ctx0,ggml_permute(ctx0,
+         //           ggml_reshape_4d(ctx0, Qcur ,64,16, latent_length,1),
+          //          0, 2, 1, 3));
+        //Kcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_3d(ctx0, cur, 1024, latent_length, 1, cur->nb[1], cur->nb[2], 1024 * sizeof(float)),0,2,1,3));
+        //Vcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_3d(ctx0, cur, 1024, latent_length, 1, cur->nb[1], cur->nb[2], 2048 * sizeof(float)),0,2,1,3));
 
     }
 
 
-    ggml_set_name(cur, "output");
+    ggml_set_name(KQ_scaled, "output");
 
 
-    ggml_build_forward_expand(gf, cur);
+    ggml_build_forward_expand(gf, KQ_scaled);
 
     ggml_free(ctx0);
 
