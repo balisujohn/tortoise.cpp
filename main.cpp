@@ -2150,7 +2150,17 @@ struct ggml_cgraph * diffusion_graph(
 
     ggml_set_name(latent_tensor, "input_latent_tensor");
 
+
+
+    struct ggml_tensor * relative_position_buckets_tensor = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, latent_length *  latent_length);
+
+
+    ggml_set_name(relative_position_buckets_tensor, "relative_position_buckets_tensor");
+
+
     ggml_build_forward_expand(gf, latent_tensor);
+    ggml_build_forward_expand(gf, relative_position_buckets_tensor);
+
     /*
     // avoid writing to tensors if we are only measuring the memory usage
     if (!ggml_allocr_is_measure(allocr)) {
@@ -2188,6 +2198,7 @@ struct ggml_cgraph * diffusion_graph(
 
     ggml_tensor * KQ;
     ggml_tensor * KQ_scaled;
+    ggml_tensor * relative_position_bias_weights;
 
     for (int i = 0; i < 1; i ++)
     {
@@ -2243,6 +2254,15 @@ struct ggml_cgraph * diffusion_graph(
 
         KQ_scaled = ggml_scale_inplace(ctx0, KQ, 1.0f/sqrt(float(64)));
 
+        relative_position_bias_weights = ggml_reshape_3d(ctx0, ggml_get_rows(ctx0, model.latent_conditioner_attention_blocks[i].relative_position_embeddings_relative_attention_bias_weight, relative_position_buckets_tensor ), 16, latent_length, latent_length);
+
+        relative_position_bias_weights = ggml_cont(ctx0,ggml_permute(ctx0, relative_position_bias_weights, 2,0,1,3));
+        
+        relative_position_bias_weights = ggml_scale_inplace(ctx0, relative_position_bias_weights, 8.0);
+
+
+        cur = ggml_add(ctx0,relative_position_bias_weights, KQ_scaled);
+
 
        // Q =ggml_cont(ctx0,ggml_permute(ctx0,
          //           ggml_reshape_4d(ctx0, Qcur ,64,16, latent_length,1),
@@ -2253,10 +2273,10 @@ struct ggml_cgraph * diffusion_graph(
     }
 
 
-    ggml_set_name(KQ_scaled, "output");
+    ggml_set_name(cur, "output");
 
 
-    ggml_build_forward_expand(gf, KQ_scaled);
+    ggml_build_forward_expand(gf, cur);
 
     ggml_free(ctx0);
 
@@ -2514,6 +2534,63 @@ int multinomial( std::vector<float> probs) // worth changing to a binary search 
         }
     }
     return 8194 - 1; // not supposed to be reached, but defaults to the last probability
+
+}
+
+std::vector<int> get_relative_position_buckets(int latent_length)
+{
+
+    std::vector<int> relative_positions(latent_length * latent_length);
+    std::vector<int> mask(latent_length * latent_length);
+    for (int i = 0; i < latent_length; i++)
+    {
+        for (int c = 0; c < latent_length; c++)
+        {
+            relative_positions[i*latent_length + c] = (abs(c-i));
+            mask[i * latent_length + c] = (i<c) ? 16 : 0;
+        
+
+            int val_if_large = 8 + (int)(
+            log(float(relative_positions[i*latent_length + c])/ 8) / log( 64.0 / 8.0 ) *( 16.0 - 8.0 )
+            
+            );
+            if (val_if_large > 15)
+            {
+                val_if_large = 15;
+            }
+            if (relative_positions[i*latent_length + c] < 8)
+            {
+                mask[i*latent_length + c] += relative_positions[i * latent_length + c];
+            }
+            else{
+                mask[i*latent_length + c] += val_if_large;
+
+            }
+        }
+    }
+
+    std::cout << "relative_positions" << std::endl;
+    for (int i = 0; i < latent_length; i++)
+    {
+        for (int c = 0; c < latent_length; c++)
+        {
+           std::cout << relative_positions[i * latent_length + c] << " ";
+        }
+        std::cout << std::endl;
+    }
+
+
+    std::cout << "mask" << std::endl;
+    for (int i = 0; i < latent_length; i++)
+    {
+        for (int c = 0; c < latent_length; c++)
+        {
+           std::cout << mask[i * latent_length + c] << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    return mask;
 
 }
 
@@ -3418,7 +3495,12 @@ int main(int argc, char ** argv) {
     ggml_backend_tensor_set(latent_tensor, trimmed_latents[0].data(), 0, trimmed_latents[0].size()*ggml_element_size(latent_tensor));
 
     
-    
+    std::vector<int> relative_position_buckets = get_relative_position_buckets(trimmed_latents[0].size()/1024);
+
+    struct ggml_tensor * relative_position_buckets_tensor = ggml_graph_get_tensor(diffusion_gf, "relative_position_buckets_tensor");      
+
+    ggml_backend_tensor_set(relative_position_buckets_tensor, relative_position_buckets.data(), 0, (trimmed_latents[0].size()/1024)*(trimmed_latents[0].size()/1024)*ggml_element_size(relative_position_buckets_tensor));
+
     
     //ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
     std::cout << "reached computing time" << std::endl;
@@ -3442,6 +3524,10 @@ int main(int argc, char ** argv) {
     ggml_backend_buffer_free(dfsn_model.buffer_w);
 
     ggml_backend_free(dfsn_model.backend);
+
+
+
+
 
     
     return 0;
