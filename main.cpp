@@ -2191,6 +2191,8 @@ struct ggml_cgraph * diffusion_graph(
    // latent conditioner attention blocks
 
 
+    ggml_tensor * residual;
+
 
     ggml_tensor * Q;
     ggml_tensor * K;
@@ -2200,11 +2202,14 @@ struct ggml_cgraph * diffusion_graph(
     ggml_tensor * KQ_scaled;
     ggml_tensor * relative_position_bias_weights;
 
-    for (int i = 0; i < 1; i ++)
+    
+    for (int i = 0; i < 4; i ++)
     {
 
 
         //group norm
+
+        residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
         cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
@@ -2262,6 +2267,28 @@ struct ggml_cgraph * diffusion_graph(
 
 
         cur = ggml_add(ctx0,relative_position_bias_weights, KQ_scaled);
+
+        //KQ_masked = ggml_diag_mask_inf_inplace(ctx0, KQ_scaled, n_past);
+
+
+        cur =  ggml_soft_max_inplace(ctx0, cur);
+
+        cur = ggml_cont(ctx0,(ggml_transpose(ctx0,ggml_reshape_2d(ctx0,ggml_mul_mat(ctx0,cur, V),latent_length, 1024))));
+
+
+
+        cur = ggml_mul_mat(ctx0,
+                    model.latent_conditioner_attention_blocks[i].projection_out_weight,
+                    cur);
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, ggml_add(ctx0,cur,
+                model.latent_conditioner_attention_blocks[i].projection_out_bias)));
+
+
+        cur = ggml_add(ctx0, cur, residual);
+
+        
 
 
        // Q =ggml_cont(ctx0,ggml_permute(ctx0,
