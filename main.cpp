@@ -2268,8 +2268,6 @@ struct ggml_cgraph * diffusion_graph(
 
         cur = ggml_add(ctx0,relative_position_bias_weights, KQ_scaled);
 
-        //KQ_masked = ggml_diag_mask_inf_inplace(ctx0, KQ_scaled, n_past);
-
 
         cur =  ggml_soft_max_inplace(ctx0, cur);
 
@@ -2288,14 +2286,6 @@ struct ggml_cgraph * diffusion_graph(
 
         cur = ggml_add(ctx0, cur, residual);
 
-        
-
-
-       // Q =ggml_cont(ctx0,ggml_permute(ctx0,
-         //           ggml_reshape_4d(ctx0, Qcur ,64,16, latent_length,1),
-          //          0, 2, 1, 3));
-        //Kcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_3d(ctx0, cur, 1024, latent_length, 1, cur->nb[1], cur->nb[2], 1024 * sizeof(float)),0,2,1,3));
-        //Vcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_3d(ctx0, cur, 1024, latent_length, 1, cur->nb[1], cur->nb[2], 2048 * sizeof(float)),0,2,1,3));
 
     }
 
