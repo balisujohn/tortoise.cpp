@@ -239,7 +239,12 @@ struct diffusion_model{
 
     struct ggml_tensor * latent_conditioner_convolution_bias;
 
+
     std::vector<latent_conditioner_attention_block> latent_conditioner_attention_blocks;
+
+    struct ggml_tensor * code_norm_weight;
+    
+    struct ggml_tensor * code_norm_bias;
 
 
 
@@ -788,12 +793,17 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
     
     }
 
+    buffer_size += 1024; // code norm weight
+    buffer_size += 1024; // code norm bias
+
+
+
 
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-          ggml_tensor_overhead() * (size_t)(3 + 7*4), //mem size
+          ggml_tensor_overhead() * (size_t)(5 + 7*4), //mem size
            NULL, //mem buffer
             true, //no alloc
         };
@@ -849,6 +859,8 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
         model.diffusion_conditioning_latent = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 2048,1);
         model.latent_conditioner_convolution_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3,1024,1024);
         model.latent_conditioner_convolution_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+        model.code_norm_weight = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+        model.code_norm_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
 
 
 
@@ -885,7 +897,8 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
         model.tensors["latent_conditioner.0.bias"] = model.latent_conditioner_convolution_bias;
         model.tensors["latent_conditioner.0.weight"] = model.latent_conditioner_convolution_weight;
 
-     
+        model.tensors["code_norm.weight"] = model.code_norm_weight;
+        model.tensors["code_norm.bias"] = model.code_norm_bias;
 
 
 
@@ -2127,7 +2140,8 @@ struct ggml_cgraph * autoregressive_graph(
 
 struct ggml_cgraph * diffusion_graph(
     struct diffusion_model & model, 
-    std::vector<float> & latent
+    std::vector<float> & latent,
+    int output_sequence_length
 )
 {
    static size_t buf_size = ggml_tensor_overhead()*GPT2_MAX_NODES + ggml_graph_overhead_custom(GPT2_MAX_NODES, false);
@@ -2158,8 +2172,15 @@ struct ggml_cgraph * diffusion_graph(
     ggml_set_name(relative_position_buckets_tensor, "relative_position_buckets_tensor");
 
 
+
+    struct ggml_tensor * conditioning_scale_offset = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 1);
+
+    ggml_set_name(conditioning_scale_offset, "conditioning_scale_offset");
+
     ggml_build_forward_expand(gf, latent_tensor);
     ggml_build_forward_expand(gf, relative_position_buckets_tensor);
+    ggml_build_forward_expand(gf, conditioning_scale_offset);
+
 
     /*
     // avoid writing to tensors if we are only measuring the memory usage
@@ -2288,6 +2309,41 @@ struct ggml_cgraph * diffusion_graph(
 
 
     }
+
+
+    //code norm (group norm)
+
+    cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+
+
+    cur = ggml_group_norm(ctx0, cur, 32);
+
+    cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+
+
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+    cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.code_norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+
+
+    cur = ggml_add(ctx0,cur, model.code_norm_bias);
+
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+    ggml_tensor * offset_conditioning_scale = ggml_add(ctx0, conditioning_scale, conditioning_scale_offset);
+
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+    cur = ggml_mul(ctx0, cur, offset_conditioning_scale);
+
+    cur = ggml_add(ctx0, cur, conditioning_shift);
+
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+
+    //float scale_factor = output_sequence_length / latent_length;
+
+    //cur = ggml_upscale(ctx0, cur, scale_factor);
 
 
     ggml_set_name(cur, "output");
@@ -3445,6 +3501,9 @@ int main(int argc, char ** argv) {
     int length = trimmed_latents[0].size() / 1024;
     int output_sequence_length = length * 4 * 24000 / 22050 ;
 
+
+    std::cout << "output sequence length: " << output_sequence_length << std::endl;
+
     std::vector<int> output_shape;
 
     output_shape.push_back(1);
@@ -3492,7 +3551,7 @@ int main(int argc, char ** argv) {
     //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
     //int n_past = model.hparams.n_ctx - n_tokens;
     //ggml_allocr_reset(diffusion_allocr);
-    struct ggml_cgraph * measure_gf = diffusion_graph( dfsn_model, trimmed_latents[0]);
+    struct ggml_cgraph * measure_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length);
     //ggml_graph_print(gf);
 
     std::cout << "graph created" << std::endl;
@@ -3503,7 +3562,7 @@ int main(int argc, char ** argv) {
     size_t mem_size =  ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
     fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
 
-    struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model, trimmed_latents[0]);
+    struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length);
     ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
 
 
@@ -3511,7 +3570,13 @@ int main(int argc, char ** argv) {
            
     ggml_backend_tensor_set(latent_tensor, trimmed_latents[0].data(), 0, trimmed_latents[0].size()*ggml_element_size(latent_tensor));
 
-    
+    struct ggml_tensor * conditioning_scale_offset_tensor = ggml_graph_get_tensor(diffusion_gf, "conditioning_scale_offset");      
+
+    float offset_val = 1.0;        
+    ggml_backend_tensor_set(conditioning_scale_offset_tensor, &offset_val, 0, ggml_element_size(latent_tensor));
+
+
+
     std::vector<int> relative_position_buckets = get_relative_position_buckets(trimmed_latents[0].size()/1024);
 
     struct ggml_tensor * relative_position_buckets_tensor = ggml_graph_get_tensor(diffusion_gf, "relative_position_buckets_tensor");      
