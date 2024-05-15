@@ -2344,7 +2344,7 @@ struct ggml_cgraph * diffusion_graph(
 
     //float scale_factor = output_sequence_length / latent_length;
 
-    cur = ggml_upscale_to_shape(ctx0, cur, output_sequence_length, 1024, 1,1);
+    cur = ggml_upscale_ext(ctx0, cur, output_sequence_length, 1024, 1,1);
 
 
     ggml_set_name(cur, "output");
@@ -3334,20 +3334,113 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
 
 }
 
+//thanks gpt3.5!
+std::vector<double> get_alphas_cumulative_product(const std::vector<double>& betas) {
+    std::vector<double> alphas;
+    alphas.reserve(betas.size());
+    
+    // Calculate alphas
+    for (const auto& beta : betas) {
+        alphas.push_back(1.0f - beta);
+    }
+    
+    // Calculate cumulative product
+    std::vector<double> alpha_cumulative_products(alphas.size());
+    std::partial_sum(alphas.begin(), alphas.end(), alpha_cumulative_products.begin(), std::multiplies<double>());
+    
+    return alpha_cumulative_products;
+}
 
-std::vector<double> get_beta_schedule(int num_diffusion_timesteps) {
+
+
+//thanks gpt3.5!
+void get_beta_schedule(int num_diffusion_timesteps, std::vector<double>  & betas) {
     double scale = 1000.0 / num_diffusion_timesteps;
     double beta_start = scale * 0.0001;
     double beta_end = scale * 0.02;
     
-    std::vector<double> betas;
     for (int i = 0; i < num_diffusion_timesteps; ++i) {
         betas.push_back(beta_start + i * (float)(beta_end - beta_start) / (num_diffusion_timesteps - 1));
     }
-    
-    return betas;
 }
 
+//thanks gpt3.5!
+std::vector<double> sqrt(const std::vector<double>& vec) {
+    std::vector<double> result(vec.size());
+    for (size_t i = 0; i < vec.size(); ++i) {
+        result[i] = std::sqrt(vec[i]);
+    }
+    return result;
+}
+
+//thanks gpt3.5!
+std::vector<double> log(const std::vector<double>& vec) {
+    std::vector<double> result(vec.size());
+    for (size_t i = 0; i < vec.size(); ++i) {
+        result[i] = std::log(vec[i]);
+    }
+    return result;
+}
+
+//thanks gpt3.5!
+std::vector<double> ones_minus(const std::vector<double>& vec) {
+    std::vector<double> result(vec.size());
+    for (size_t i = 0; i < vec.size(); ++i) {
+        result[i] = 1.0f - vec[i];
+    }
+    return result;
+}
+
+//thanks gpt3.5!
+std::vector<double> reciprocal(const std::vector<double>& vec) {
+    std::vector<double> result(vec.size());
+    for (size_t i = 0; i < vec.size(); ++i) {
+        result[i] = 1.0f / vec[i];
+    }
+    return result;
+}
+
+//thanks gpt3.5!
+std::vector<double> reciprocal_minus_one(const std::vector<double>& vec) {
+    std::vector<double> result(vec.size());
+    for (size_t i = 0; i < vec.size(); ++i) {
+        result[i] = 1.0f / vec[i] - 1;
+    }
+    return result;
+}
+
+//thanks gpt3.5!
+void calculate_posterior_variance(std::vector<double>& posterior_variance, const std::vector<double>& betas, const std::vector<double>& alphas_cumprod_prev, const std::vector<double>& alphas_cumprod) {
+    posterior_variance.resize(betas.size());
+    for (size_t i = 0; i < betas.size(); ++i) {
+        posterior_variance[i] = betas[i] * (1.0 - alphas_cumprod_prev[i]) / (1.0 - alphas_cumprod[i]);
+    }
+}
+
+//thanks gpt3.5!
+void calculate_posterior_log_variance_clipped(std::vector<double>& posterior_log_variance_clipped, const std::vector<double>& posterior_variance) {
+    posterior_log_variance_clipped.resize(posterior_variance.size());
+    posterior_log_variance_clipped[0] = std::log(posterior_variance[1]);
+    for (size_t i = 1; i < posterior_variance.size(); ++i) {
+        posterior_log_variance_clipped[i] = std::log(posterior_variance[i]);
+    }
+}
+
+//thanks gpt3.5!
+void calculate_posterior_mean_coef1(std::vector<double>& posterior_mean_coef1, const std::vector<double>& betas, const std::vector<double>& alphas_cumprod_prev, const std::vector<double>& alphas_cumprod) {
+    posterior_mean_coef1.resize(betas.size());
+    for (size_t i = 0; i < betas.size(); ++i) {
+        posterior_mean_coef1[i] = betas[i] * sqrt(alphas_cumprod_prev[i]) / (1.0 - alphas_cumprod[i]);
+    }
+}
+
+//thanks gpt3.5!
+void calculate_posterior_mean_coef2(std::vector<double>& posterior_mean_coef2, const std::vector<double>& alphas_cumprod_prev, const std::vector<double>& alphas_cumprod, const std::vector<double>& betas) {
+    posterior_mean_coef2.resize(alphas_cumprod_prev.size());
+    for (size_t i = 0; i < alphas_cumprod_prev.size(); ++i) {
+        posterior_mean_coef2[i] = (1.0 - alphas_cumprod_prev[i]) * sqrt(1.0-betas[i]) / (1.0 - alphas_cumprod[i]);
+    }
+}
 
 
 
@@ -3658,23 +3751,64 @@ int main(int argc, char ** argv) {
     std::vector<float> noise = sample_diffusion_noise( 100 * output_sequence_length);
     save_f32_vector("./logs/diffusion_noise.bin", noise);
 
-    std::vector<double> beta_schedule = get_beta_schedule(4000);
+    std::vector<double> beta_schedule(0);
+     get_beta_schedule(4000, beta_schedule);
  
-  // Print the first three entries
-    std::cout << "First three betas: ";
-    for (int i = 0; i < 3; ++i) {
-        std::cout << beta_schedule[i] << " ";
-    }
-    std::cout << std::endl;
+    printVector(beta_schedule, 3,  "beta schedule");
     
-    // Print the last three entries
-    std::cout << "Last three betas: ";
-    for (int i = beta_schedule.size() - 3; i < beta_schedule.size(); ++i) {
-        std::cout << beta_schedule[i] << " ";
-    }
-    std::cout << std::endl;
+    std::vector<double> alpha_cumulative_products = get_alphas_cumulative_product(beta_schedule);
 
     
+    printVector(alpha_cumulative_products, 3,  "alpha cumulative products");
+
+    std::vector<double> alpha_cumulative_products_prev(alpha_cumulative_products.size());
+    std::vector<double> alpha_cumulative_products_next(alpha_cumulative_products.size());
+
+    alpha_cumulative_products_prev.front() = 1.0f;
+    std::copy(alpha_cumulative_products.begin(), alpha_cumulative_products.end() - 1, alpha_cumulative_products_prev.begin() + 1);
+
+    std::copy(alpha_cumulative_products.begin() + 1, alpha_cumulative_products.end(), alpha_cumulative_products_next.begin());
+    alpha_cumulative_products_next.back() = 0.0f;
+
+    std::vector<double> sqrt_alphas_cumprod = sqrt(alpha_cumulative_products);
+    std::vector<double> sqrt_one_minus_alphas_cumprod = sqrt(ones_minus(alpha_cumulative_products));
+    std::vector<double> log_one_minus_alphas_cumprod = log(ones_minus(alpha_cumulative_products));
+    std::vector<double> sqrt_reciprocal_alphas_cumprod = sqrt(reciprocal(alpha_cumulative_products));
+    std::vector<double> sqrt_reciprocal_minus_one_alphas_cumprod = sqrt(reciprocal_minus_one(alpha_cumulative_products) );
+
+    std::vector<double> posterior_variance;
+    std::vector<double> posterior_log_variance_clipped;
+    std::vector<double> posterior_mean_coef1;
+    std::vector<double> posterior_mean_coef2;
+
+    calculate_posterior_variance(posterior_variance, beta_schedule, alpha_cumulative_products_prev, alpha_cumulative_products);
+    calculate_posterior_log_variance_clipped(posterior_log_variance_clipped, posterior_variance);
+    calculate_posterior_mean_coef1(posterior_mean_coef1, beta_schedule, alpha_cumulative_products_prev, alpha_cumulative_products);
+    calculate_posterior_mean_coef2(posterior_mean_coef2, alpha_cumulative_products_prev, alpha_cumulative_products, beta_schedule);
+
+
+    std::vector<int> timestep_map = {0, 51, 101, 152, 202, 253, 304, 354, 405, 456, 506, 557, 607, 658, 709, 759, 810, 861, 911, 962, 
+    1012, 1063, 1114, 1164, 1215, 1266, 1316, 1367, 1417, 1468, 1519, 1569, 1620, 1670, 1721, 1772, 1822, 1873, 1924, 1974, 2025, 2075, 
+    2126, 2177, 2227, 2278, 2329, 2379, 2430, 2480, 2531, 2582, 2632, 2683, 2733, 2784, 2835, 2885, 2936, 2987, 3037, 3088, 3138, 3189, 
+    3240, 3290, 3341, 3392, 3442, 3493, 3543, 3594, 3645, 3695, 3746, 3797, 3847, 3898, 3948, 3999};
+
+
+    printVector(alpha_cumulative_products_prev, 3,  "alpha cumulative products prev");
+    printVector(alpha_cumulative_products_next, 3,  "alpha cumulative product next");
+
+    printVector(sqrt_alphas_cumprod, 3,  "sqrt_alphas_cumprod");
+    printVector(sqrt_one_minus_alphas_cumprod, 3,  "sqrt_one_minus_alphas_cumprod");
+    printVector(log_one_minus_alphas_cumprod, 3,  "log_one_minus_alphas_cumprod");
+    printVector(sqrt_reciprocal_alphas_cumprod, 3,  "sqrt_reciprocal_alphas_cumprod");
+    printVector(sqrt_reciprocal_minus_one_alphas_cumprod, 3,  "sqrt_reciprocal_minus_one_alphas_cumprod");
+
+    printVector(posterior_variance, 3, "Posterior Variance");
+    printVector(posterior_log_variance_clipped, 3, "Posterior Log Variance Clipped");
+    printVector(posterior_mean_coef1, 3, "Posterior Mean Coef1");
+    printVector(posterior_mean_coef2, 3, "Posterior Mean Coef2");
+
+
+
     return 0;
   
 }
