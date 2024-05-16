@@ -3624,10 +3624,9 @@ void test_autoregressive(){
 
 int main(int argc, char ** argv) {
 
-   // test_autoregressive();
-   
-    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive("placeholder");
+    //test_autoregressive();
     //exit(0);
+    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive("placeholder");
     
     std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
     std::vector<std::vector<int>> sequences = autoregressive_result.second;
