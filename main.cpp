@@ -227,6 +227,45 @@ struct latent_conditioner_attention_block{
 
 };
 
+struct conditioning_timestep_integrator_diffusion_layer{
+
+    struct ggml_tensor * resblock_in_layers_0_weight;
+
+    struct ggml_tensor * resblock_in_layers_0_bias;
+
+    struct ggml_tensor * resblock_in_layers_2_weight;
+
+    struct ggml_tensor * resblock_in_layers_2_bias;
+
+    struct ggml_tensor * resblock_emb_layers_1_weight;
+
+    struct ggml_tensor * resblock_emb_layers_1_bias;
+
+    struct ggml_tensor * resblock_out_layers_0_weight;
+
+    struct ggml_tensor * resblock_out_layers_0_bias;
+
+    struct ggml_tensor * resblock_out_layers_3_weight;
+
+    struct ggml_tensor * resblock_out_layers_3_bias;
+
+    struct ggml_tensor * attn_norm_weight;
+
+    struct ggml_tensor * attn_norm_bias;
+
+    struct ggml_tensor * attn_qkv_weight;
+
+    struct ggml_tensor * attn_qkv_bias;
+
+    struct ggml_tensor * attn_proj_out_weight;
+
+    struct ggml_tensor * attn_proj_out_bias;
+
+    struct ggml_tensor * attn_relative_pos_embeddings_relative_attention_bias_weight;
+
+
+};
+
 
 
 struct diffusion_model{
@@ -247,6 +286,15 @@ struct diffusion_model{
     
     struct ggml_tensor * code_norm_bias;
 
+    struct ggml_tensor * time_emb_linear_0_weight;
+    
+    struct ggml_tensor * time_emb_linear_0_bias;
+
+    struct ggml_tensor * time_emb_linear_1_weight;
+
+    struct ggml_tensor * time_emb_linear_1_bias;
+
+    std::vector<conditioning_timestep_integrator_diffusion_layer> conditioning_timestep_integrator_diffusion_layers;
 
 
     std::map<std::string, struct ggml_tensor *> tensors;
@@ -794,8 +842,54 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
     
     }
 
-    buffer_size += 1024; // code norm weight
-    buffer_size += 1024; // code norm bias
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // code norm weight
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // code norm bias
+
+    buffer_size += 1024 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // time embed linear 0 weight
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // time embed linear 0 bias
+
+
+    buffer_size += 1024 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // time embed linear 1 weight
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // time embed linear 1 bias
+
+    for (int i = 0; i < 3; i ++)
+    {
+
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.in_layers.0.weight
+
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.in_layers.0.bias
+
+        buffer_size += 1024 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.in_layers.2.weight
+
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.in_layers.2.bias
+
+        buffer_size += 2048 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.emb_layers.1.weight
+
+        buffer_size += 2048 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.emb_layers.1.bias
+
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.out_layers.0.weight
+
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.out_layers.0.bias
+
+        buffer_size += 1024 * 1024 * 3 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.out_layers.3.weight
+
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.out_layers.3.bias
+
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.norm.weight
+
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.norm.bias
+
+        buffer_size += 3072 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.qkv.weight
+
+        buffer_size += 3072 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.qkv.bias
+
+        buffer_size += 1024 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.proj_out.weight
+
+        buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.proj_out.bias
+
+        buffer_size += 32 * 16 * ggml_type_sizef(GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.relative_pos_embeddings.relative_attention_bias.weight
+    }
+
 
 
 
@@ -804,7 +898,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-          ggml_tensor_overhead() * (size_t)(5 + 7*4), //mem size
+          ggml_tensor_overhead() * (size_t)(5 + 7*4 + 4 + (3 * 18)), //mem size
            NULL, //mem buffer
             true, //no alloc
         };
@@ -892,6 +986,59 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
     
         }
 
+        model.time_emb_linear_0_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,1024);
+        model.time_emb_linear_0_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+
+        model.time_emb_linear_1_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,1024);
+        model.time_emb_linear_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+
+
+        model.conditioning_timestep_integrator_diffusion_layers.resize(3);
+        for (int i = 0; i < 3; i ++)
+        {
+            auto & layer = model.conditioning_timestep_integrator_diffusion_layers[i];
+
+            layer.resblock_in_layers_0_weight = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.resblock_in_layers_0_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.resblock_in_layers_2_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024, 1024);
+            layer.resblock_in_layers_2_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.resblock_emb_layers_1_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024, 2048);
+            layer.resblock_emb_layers_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 2048);
+            layer.resblock_out_layers_0_weight = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.resblock_out_layers_0_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.resblock_out_layers_3_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 1024, 1024);
+            layer.resblock_out_layers_3_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.attn_norm_weight = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.attn_norm_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.attn_qkv_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024, 3072);
+            layer.attn_qkv_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 3072);
+            layer.attn_proj_out_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024, 1024);
+            layer.attn_proj_out_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.attn_relative_pos_embeddings_relative_attention_bias_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 16, 32);
+
+
+
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".resblk.in_layers.0.weight"] =  layer.resblock_in_layers_0_weight;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".resblk.in_layers.0.bias"] = layer.resblock_in_layers_0_bias;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".resblk.in_layers.2.weight"] = layer.resblock_in_layers_2_weight;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".resblk.in_layers.2.bias"] = layer.resblock_in_layers_2_bias;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".resblk.emb_layers.1.weight"] = layer.resblock_emb_layers_1_weight;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".resblk.emb_layers.1.bias"] = layer.resblock_emb_layers_1_bias;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".resblk.out_layers.0.weight"] = layer.resblock_out_layers_0_weight;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".resblk.out_layers.0.bias"] = layer.resblock_out_layers_0_bias;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".resblk.out_layers.3.weight"] = layer.resblock_out_layers_3_weight;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".resblk.out_layers.3.bias"] = layer.resblock_out_layers_3_bias;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".attn.norm.weight"] = layer.attn_norm_weight;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".attn.norm.bias"] = layer.attn_norm_bias;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".attn.qkv.weight"] = layer.attn_qkv_weight;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".attn.qkv.bias"] = layer.attn_qkv_bias;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".attn.proj_out.weight"] = layer.attn_proj_out_weight;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".attn.proj_out.bias"] = layer.attn_proj_out_bias;
+            model.tensors["conditioning_timestep_integrator." + std::to_string(i) + ".attn.relative_pos_embeddings.relative_attention_bias.weight"] = layer.attn_relative_pos_embeddings_relative_attention_bias_weight;
+
+        }
+
+
 
 
         model.tensors["diffusion_conditioning_latent"] = model.diffusion_conditioning_latent;
@@ -900,6 +1047,12 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
 
         model.tensors["code_norm.weight"] = model.code_norm_weight;
         model.tensors["code_norm.bias"] = model.code_norm_bias;
+
+        model.tensors["time_embed.0.weight"] = model.time_emb_linear_0_weight;
+        model.tensors["time_embed.0.bias"] = model.time_emb_linear_0_bias;
+
+        model.tensors["time_embed.2.weight"] = model.time_emb_linear_1_weight;
+        model.tensors["time_embed.2.bias"] = model.time_emb_linear_1_bias;
 
 
 
@@ -3442,6 +3595,31 @@ void calculate_posterior_mean_coef2(std::vector<double>& posterior_mean_coef2, c
     }
 }
 
+//thanks gpt3.5!
+std::vector<float> generate_timestep_embedding(const std::vector<int>& timesteps, const int dim, const int max_period) {
+    int half = dim / 2;
+    std::vector<float> cos_embedding;
+    std::vector<float> sin_embedding;
+
+    // Calculate frequencies
+    for (int i = 0; i < half; ++i) {
+        float freq = exp(-log(max_period) * static_cast<float>(i) / half);
+        float arg = static_cast<float>(timesteps[0]) * freq;
+        
+        // Append cosine and sine values
+        cos_embedding.push_back(cos(arg));
+        sin_embedding.push_back(sin(arg));
+    }
+
+
+    cos_embedding.insert(cos_embedding.end(), sin_embedding.begin(), sin_embedding.end());
+    // If dim is odd, add one zero value to the embedding
+    if (dim % 2) {
+        cos_embedding.push_back(0.0f);
+    }
+
+    return cos_embedding;
+}
 
 
 /*
@@ -3791,6 +3969,19 @@ int main(int argc, char ** argv) {
     2126, 2177, 2227, 2278, 2329, 2379, 2430, 2480, 2531, 2582, 2632, 2683, 2733, 2784, 2835, 2885, 2936, 2987, 3037, 3088, 3138, 3189, 
     3240, 3290, 3341, 3392, 3442, 3493, 3543, 3594, 3645, 3695, 3746, 3797, 3847, 3898, 3948, 3999};
 
+    // Vector to store vectors of floats
+    std::vector<std::vector<float>> time_embeddings;
+    int max_period = 10000;
+    int dim = 1024;
+
+    // Iterate backwards over the timestep_map
+    for (auto it = timestep_map.rbegin(); it != timestep_map.rend(); ++it) {
+        std::vector<int> timesteps = {*it}; // Create a vector with single timestep
+        std::vector<float> embedding = generate_timestep_embedding(timesteps, dim, max_period);
+        time_embeddings.push_back(embedding);
+    }
+
+  
 
     printVector(alpha_cumulative_products_prev, 3,  "alpha cumulative products prev");
     printVector(alpha_cumulative_products_next, 3,  "alpha cumulative product next");
@@ -3805,7 +3996,12 @@ int main(int argc, char ** argv) {
     printVector(posterior_log_variance_clipped, 3, "Posterior Log Variance Clipped");
     printVector(posterior_mean_coef1, 3, "Posterior Mean Coef1");
     printVector(posterior_mean_coef2, 3, "Posterior Mean Coef2");
+    
+    for (int i = 0; i < time_embeddings.size(); i ++)
+    {
+        printVector(time_embeddings[i], 3,  "time embeddings:" + std::to_string(i));
 
+    }
 
 
     return 0;
