@@ -2309,10 +2309,23 @@ struct ggml_cgraph * diffusion_graph(
 
     int latent_length = latent.size()/1024;
 
+    int time_embedding_size = 80;
+
 
     struct ggml_context * ctx0 = ggml_init(params);
 
     struct ggml_cgraph  * gf = ggml_new_graph_custom(ctx0, GPT2_MAX_NODES, false);
+
+
+    std::vector<ggml_tensor *> time_embedding_tensors(time_embedding_size);
+    for (int i = 0; i < time_embedding_size; i ++)
+    {
+        time_embedding_tensors[i] = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 1024);
+        ggml_set_name(time_embedding_tensors[i], ("time_embedding_" + std::to_string(i)).c_str());
+        ggml_build_forward_expand(gf, time_embedding_tensors[i]);
+
+    }
+
 
    struct ggml_tensor * latent_tensor = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, latent.size());
 
@@ -2495,9 +2508,42 @@ struct ggml_cgraph * diffusion_graph(
     cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
 
 
-    //float scale_factor = output_sequence_length / latent_length;
-
     cur = ggml_upscale_ext(ctx0, cur, output_sequence_length, 1024, 1,1);
+
+
+
+    for (int i = 0; i < 1; i ++)
+    {
+
+        cur = time_embedding_tensors[i];
+
+        cur = ggml_mul_mat(ctx0,
+                        model.time_emb_linear_0_weight,
+                        cur);
+
+
+
+        cur = ggml_add(ctx0,cur,
+                 model.time_emb_linear_0_bias);
+
+        cur = ggml_silu(ctx0, cur);
+
+
+        cur = ggml_mul_mat(ctx0,
+                        model.time_emb_linear_1_weight,
+                        cur);
+
+
+
+        cur = ggml_add(ctx0,cur,
+                 model.time_emb_linear_1_bias);
+
+
+    }
+
+
+
+
 
 
     ggml_set_name(cur, "output");
@@ -3899,6 +3945,36 @@ int main(int argc, char ** argv) {
 
     ggml_backend_tensor_set(relative_position_buckets_tensor, relative_position_buckets.data(), 0, (trimmed_latents[0].size()/1024)*(trimmed_latents[0].size()/1024)*ggml_element_size(relative_position_buckets_tensor));
 
+
+
+    std::vector<int> timestep_map = {0, 51, 101, 152, 202, 253, 304, 354, 405, 456, 506, 557, 607, 658, 709, 759, 810, 861, 911, 962, 
+    1012, 1063, 1114, 1164, 1215, 1266, 1316, 1367, 1417, 1468, 1519, 1569, 1620, 1670, 1721, 1772, 1822, 1873, 1924, 1974, 2025, 2075, 
+    2126, 2177, 2227, 2278, 2329, 2379, 2430, 2480, 2531, 2582, 2632, 2683, 2733, 2784, 2835, 2885, 2936, 2987, 3037, 3088, 3138, 3189, 
+    3240, 3290, 3341, 3392, 3442, 3493, 3543, 3594, 3645, 3695, 3746, 3797, 3847, 3898, 3948, 3999};
+
+    // Vector to store vectors of floats
+    std::vector<std::vector<float>> time_embeddings;
+    int max_period = 10000;
+    int dim = 1024;
+
+    // Iterate backwards over the timestep_map
+    for (auto it = timestep_map.rbegin(); it != timestep_map.rend(); ++it) {
+        std::vector<int> timesteps = {*it}; // Create a vector with single timestep
+        std::vector<float> embedding = generate_timestep_embedding(timesteps, dim, max_period);
+        time_embeddings.push_back(embedding);
+    }
+
+    for (int i = 0 ; i < time_embeddings.size(); i ++)
+    {
+        std::cout << "test" <<  i << std::endl;
+        struct ggml_tensor * time_embedding_tensor = ggml_graph_get_tensor(diffusion_gf, ("time_embedding_" + std::to_string(i)).c_str());      
+                std::cout << "test" <<  i << std::endl;
+
+        ggml_backend_tensor_set(time_embedding_tensor, time_embeddings[i].data(), 0, (time_embeddings[i].size() *ggml_element_size(time_embedding_tensor)));
+
+    }
+
+
     
     //ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
     std::cout << "reached computing time" << std::endl;
@@ -3963,23 +4039,6 @@ int main(int argc, char ** argv) {
     calculate_posterior_mean_coef1(posterior_mean_coef1, beta_schedule, alpha_cumulative_products_prev, alpha_cumulative_products);
     calculate_posterior_mean_coef2(posterior_mean_coef2, alpha_cumulative_products_prev, alpha_cumulative_products, beta_schedule);
 
-
-    std::vector<int> timestep_map = {0, 51, 101, 152, 202, 253, 304, 354, 405, 456, 506, 557, 607, 658, 709, 759, 810, 861, 911, 962, 
-    1012, 1063, 1114, 1164, 1215, 1266, 1316, 1367, 1417, 1468, 1519, 1569, 1620, 1670, 1721, 1772, 1822, 1873, 1924, 1974, 2025, 2075, 
-    2126, 2177, 2227, 2278, 2329, 2379, 2430, 2480, 2531, 2582, 2632, 2683, 2733, 2784, 2835, 2885, 2936, 2987, 3037, 3088, 3138, 3189, 
-    3240, 3290, 3341, 3392, 3442, 3493, 3543, 3594, 3645, 3695, 3746, 3797, 3847, 3898, 3948, 3999};
-
-    // Vector to store vectors of floats
-    std::vector<std::vector<float>> time_embeddings;
-    int max_period = 10000;
-    int dim = 1024;
-
-    // Iterate backwards over the timestep_map
-    for (auto it = timestep_map.rbegin(); it != timestep_map.rend(); ++it) {
-        std::vector<int> timesteps = {*it}; // Create a vector with single timestep
-        std::vector<float> embedding = generate_timestep_embedding(timesteps, dim, max_period);
-        time_embeddings.push_back(embedding);
-    }
 
   
 
