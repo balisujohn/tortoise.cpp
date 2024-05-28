@@ -3931,8 +3931,8 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
     std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
     //std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
-    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
-    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
+    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,135,198,48,167,158,32,3,2,14,34,51,46,20,175,212,76,2,115,126,25,2,170,29,64,136,3,0,0,255,135,198,48,167,158,32,3,2,14,34,51,46,20,175,212,76,2,115,126,25,2,170,29,64,136,3,0,0", ','); //"Congratulations! Autoregressive model complete!"
     //exit(0);
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,42,2,97,60,49,2,63,48,61,2,26,163,2,149,2,68,161,33,2,42,2,33,77,78,16,32,2,58,2,42,2,50,18,125,9,2,80,43,32,2,127,2,106,29,57,33,159,7,2,55,2,204,32,9,2,16,31,54,54,2,26,213,61,2,60,2,136,26,29,242,2,51,2,22,20,95,46,2,42,2,36,54,18,2,46,63,31,137,192,2,73,2,26,245,2,26,50,2,19,46,18,9,2,0,0", ','); // "The United States must not adopt the tactics of the enemy. Means are important, as ends. Crisis makes it tempting to ignore the wise restraints that make men free." - Frank Church
@@ -5089,9 +5089,11 @@ int main(int argc, char ** argv) {
 
 
         std::vector<float> model_sample;
+
+        std::vector<float> sample_noise = sample_diffusion_noise( 100 * output_sequence_length);
         
         if (79-diffusion_index != 0){
-        model_sample = sample_function(final_model_mean, model_log_variance, noise );
+        model_sample = sample_function(final_model_mean, model_log_variance, sample_noise );
         }
         else{
         model_sample= final_model_mean;
@@ -5102,6 +5104,9 @@ int main(int argc, char ** argv) {
 
 
     }
+
+    save_f32_vector("./logs/mel.bin", x);
+
 
 
     ggml_free(dfsn_model.ctx);
