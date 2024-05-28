@@ -333,6 +333,16 @@ struct diffusion_model{
     std::vector<residual_block> main_residual_blocks;
 
 
+    struct ggml_tensor * out_group_norm_weight;
+    struct ggml_tensor * out_group_norm_bias;
+
+    struct ggml_tensor * out_convolution_weight;
+    struct ggml_tensor * out_convolution_bias;
+
+    
+    struct ggml_tensor * unconditioned_embedding;
+
+
 
     std::map<std::string, struct ggml_tensor *> tensors;
 
@@ -416,12 +426,14 @@ void compare_to_saved_tensor_with_name(ggml_tensor * tensor){
 }
 
 
-void extract_latents_to_vector(ggml_tensor * tensor, std::vector<float>  & latents)
+void extract_tensor_to_vector(ggml_tensor * tensor, std::vector<float>  & vector)
 {
     int elements = tensor->ne[0] * tensor->ne[1] * tensor->ne[2] * tensor->ne[3];
-    latents.resize(elements);
-    ggml_backend_tensor_get(tensor,latents.data(), 0 ,sizeof(float)* elements);
+    vector.resize(elements);
+    ggml_backend_tensor_get(tensor,vector.data(), 0 ,sizeof(float)* elements);
 }
+
+
 
 
 /*
@@ -1001,10 +1013,14 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
     }
 
 
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // out group norm weight
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // out group norm bias
+    buffer_size += 1024 * 200 * 3 * ggml_type_sizef(GGML_TYPE_F32); // out convolution weight
+    buffer_size += 1024 * 200 * ggml_type_sizef(GGML_TYPE_F32); // out convolution bias
 
 
 
-
+    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // unconditioned embedding
 
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
@@ -1232,6 +1248,24 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
             model.tensors["layers." + std::to_string(i) + ".out_layers.3.bias"] = layer.out_layers_3_bias;
 
         }
+
+        model.out_group_norm_weight = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+        model.out_group_norm_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+
+        model.out_convolution_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 1024, 200 );
+        model.out_convolution_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 200);
+
+        model.unconditioned_embedding = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+
+
+        model.tensors["unconditioned_embedding"] = model.unconditioned_embedding;
+
+
+        model.tensors["out.0.weight"] = model.out_group_norm_weight;
+        model.tensors["out.0.bias"] = model.out_group_norm_bias;
+
+        model.tensors["out.2.weight"] = model.out_convolution_weight;
+        model.tensors["out.2.bias"] = model.out_convolution_bias;
 
 
         model.tensors["diffusion_conditioning_latent"] = model.diffusion_conditioning_latent;
@@ -2494,10 +2528,13 @@ struct ggml_cgraph * autoregressive_graph(
 */
 
 
+
 struct ggml_cgraph * diffusion_graph(
     struct diffusion_model & model, 
     std::vector<float> & latent,
-    int output_sequence_length
+    int output_sequence_length,
+    int diffusion_index,
+    bool conditioning_free
 )
 {
    static size_t buf_size = ggml_tensor_overhead()*GPT2_MAX_NODES + ggml_graph_overhead_custom(GPT2_MAX_NODES, false);
@@ -2575,26 +2612,10 @@ struct ggml_cgraph * diffusion_graph(
     latent_tensor = ggml_reshape_3d(ctx0, latent_tensor, 1024 , latent_length, 1);
     latent_tensor = ggml_cont(ctx0,ggml_permute(ctx0, latent_tensor, 1,0,2,3));
 
-
-    ggml_tensor * conditioning_scale = ggml_view_1d(ctx0, model.diffusion_conditioning_latent, 1024, 0); 
-    ggml_tensor * conditioning_shift = ggml_view_1d(ctx0, model.diffusion_conditioning_latent, 1024, ggml_element_size(model.diffusion_conditioning_latent) * 1024);
+    ggml_tensor * cur = latent_tensor;
 
 
-    ggml_tensor * float_16_latent_conditioner_convolution_weight =   ggml_cpy(ctx0, model.latent_conditioner_convolution_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.latent_conditioner_convolution_weight->ne));
-
-
-    ggml_tensor * cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_latent_conditioner_convolution_weight, latent_tensor, 1,1,1 ));
-
-
-    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-
-    cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.latent_conditioner_convolution_bias)));
-
-
-   // latent conditioner attention blocks
-
-
+    
     ggml_tensor * residual;
 
 
@@ -2606,11 +2627,285 @@ struct ggml_cgraph * diffusion_graph(
     ggml_tensor * KQ_scaled;
     ggml_tensor * relative_position_bias_weights;
 
-    
-    for (int i = 0; i < 4; i ++)
+
+
+
+    if(!conditioning_free)
+    {
+        ggml_tensor * conditioning_scale = ggml_view_1d(ctx0, model.diffusion_conditioning_latent, 1024, 0); 
+        ggml_tensor * conditioning_shift = ggml_view_1d(ctx0, model.diffusion_conditioning_latent, 1024, ggml_element_size(model.diffusion_conditioning_latent) * 1024);
+
+
+        ggml_tensor * float_16_latent_conditioner_convolution_weight =   ggml_cpy(ctx0, model.latent_conditioner_convolution_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.latent_conditioner_convolution_weight->ne));
+
+
+        cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_latent_conditioner_convolution_weight, cur, 1,1,1 ));
+
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.latent_conditioner_convolution_bias)));
+
+
+    // latent conditioner attention blocks
+
+
+        
+
+        
+        for (int i = 0; i < 4; i ++)
+        {
+
+
+            //group norm
+
+            residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+            cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+
+
+            cur = ggml_group_norm(ctx0, cur, 32);
+
+            cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+
+
+            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+
+            cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.latent_conditioner_attention_blocks[i].norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+
+
+            cur = ggml_add(ctx0,cur, model.latent_conditioner_attention_blocks[i].norm_bias);
+
+            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+            // qkv
+
+
+            ggml_tensor * float_16_qkv_weight=   ggml_reshape_3d(ctx0, ggml_cpy(ctx0, model.latent_conditioner_attention_blocks[i].qkv_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.latent_conditioner_attention_blocks[i].qkv_weight->ne)), 1,1024, 3072);
+
+
+            cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_qkv_weight, cur, 1,0,1 ));
+
+            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+            cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.latent_conditioner_attention_blocks[i].qkv_bias)));
+
+            cur = ggml_reshape_3d(ctx0, cur, latent_length, 192, 16);
+
+            //derived from ggml reference gpt-2 implementation
+            Q = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, latent_length, 64, 16, cur->nb[1], cur->nb[2], 0));
+
+            K = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, latent_length, 64, 16, cur->nb[1], cur->nb[2], latent_length * 64  * ggml_element_size(cur)));
+
+            V = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, latent_length, 64, 16, cur->nb[1], cur->nb[2], latent_length * 128  * ggml_element_size(cur)));
+
+
+            KQ = ggml_mul_mat(ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,K)),ggml_cont(ctx0,ggml_transpose(ctx0,Q)));
+
+
+            KQ_scaled = ggml_scale_inplace(ctx0, KQ, 1.0f/sqrt(float(64)));
+
+            relative_position_bias_weights = ggml_reshape_3d(ctx0, ggml_get_rows(ctx0, model.latent_conditioner_attention_blocks[i].relative_position_embeddings_relative_attention_bias_weight, relative_position_buckets_tensor ), 16, latent_length, latent_length);
+
+            relative_position_bias_weights = ggml_cont(ctx0,ggml_permute(ctx0, relative_position_bias_weights, 2,0,1,3));
+            
+            relative_position_bias_weights = ggml_scale_inplace(ctx0, relative_position_bias_weights, 8.0);
+
+
+            cur = ggml_add(ctx0,relative_position_bias_weights, KQ_scaled);
+
+
+            cur =  ggml_soft_max_inplace(ctx0, cur);
+
+            cur = ggml_cont(ctx0,(ggml_transpose(ctx0,ggml_reshape_2d(ctx0,ggml_mul_mat(ctx0,cur, V),latent_length, 1024))));
+
+
+
+            cur = ggml_mul_mat(ctx0,
+                        model.latent_conditioner_attention_blocks[i].projection_out_weight,
+                        cur);
+
+
+            cur = ggml_cont(ctx0,ggml_transpose(ctx0, ggml_add(ctx0,cur,
+                    model.latent_conditioner_attention_blocks[i].projection_out_bias)));
+
+
+            cur = ggml_add(ctx0, cur, residual);
+
+
+        }
+
+
+        //code norm (group norm)
+
+        cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+
+
+        cur = ggml_group_norm(ctx0, cur, 32);
+
+        cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.code_norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+
+
+        cur = ggml_add(ctx0,cur, model.code_norm_bias);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+        ggml_tensor * offset_conditioning_scale = ggml_add(ctx0, conditioning_scale, conditioning_scale_offset);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+        cur = ggml_mul(ctx0, cur, offset_conditioning_scale);
+
+        cur = ggml_add(ctx0, cur, conditioning_shift);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+
+        cur = ggml_upscale_ext(ctx0, cur, output_sequence_length, 1024, 1,1);
+    }
+    else{
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, ggml_repeat(ctx0, model.unconditioned_embedding, ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 1024, output_sequence_length))));
+    }
+
+
+
+    ggml_tensor * emb = time_embedding_tensors[diffusion_index];
+
+    emb = ggml_mul_mat(ctx0,
+                    model.time_emb_linear_0_weight,
+                    emb);
+
+
+
+    emb = ggml_add(ctx0,emb,
+                model.time_emb_linear_0_bias);
+
+    emb = ggml_silu(ctx0, emb);
+
+
+    emb = ggml_mul_mat(ctx0,
+                    model.time_emb_linear_1_weight,
+                    emb);
+
+
+
+    emb = ggml_add(ctx0,emb,
+                model.time_emb_linear_1_bias);
+
+
+
+    ggml_tensor * time_embedding = emb;
+
+
+    ggml_tensor * code_embedding;
+
+
+    for (int c = 0; c < 3 ; c++)
     {
 
+        // Resblock
 
+        {
+        ggml_tensor * pass_through = cur;
+
+        // in_layers
+
+        cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+
+
+        cur = ggml_group_norm(ctx0, cur, 32);
+
+        cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+
+        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.timestep_conditioning_integrator_diffusion_layers[c].resblock_in_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+
+
+        cur = ggml_add(ctx0,cur, model.timestep_conditioning_integrator_diffusion_layers[c].resblock_in_layers_0_bias);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+        
+        cur = ggml_silu(ctx0, cur);
+
+        ggml_tensor * float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.timestep_conditioning_integrator_diffusion_layers[c].resblock_in_layers_2_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.timestep_conditioning_integrator_diffusion_layers[c].resblock_in_layers_2_weight->ne)),1,1024,1024);
+        cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,0,1 ));
+        
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.timestep_conditioning_integrator_diffusion_layers[c].resblock_in_layers_2_bias)));
+
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+        // emb_layers
+
+        ggml_tensor * temp_emb = ggml_silu(ctx0, emb);
+
+
+        temp_emb = ggml_mul_mat(ctx0, temp_emb, model.timestep_conditioning_integrator_diffusion_layers[c].resblock_emb_layers_1_weight);
+
+        temp_emb = ggml_cont(ctx0,ggml_transpose(ctx0, temp_emb));
+
+
+        temp_emb = ggml_add(ctx0,temp_emb,
+            model.timestep_conditioning_integrator_diffusion_layers[c].resblock_emb_layers_1_bias);
+
+        // out layers
+
+
+        ggml_tensor * emb_scale = ggml_view_1d(ctx0, temp_emb, 1024, 0); 
+        ggml_tensor * emb_shift = ggml_view_1d(ctx0, temp_emb, 1024, ggml_element_size(temp_emb) * 1024);
+
+        cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+
+        cur = ggml_group_norm(ctx0, cur, 32);
+
+        cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.timestep_conditioning_integrator_diffusion_layers[c].resblock_out_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+
+
+        cur = ggml_add(ctx0,cur, model.timestep_conditioning_integrator_diffusion_layers[c].resblock_out_layers_0_bias);
+
+        cur =ggml_mul(ctx0, cur, ggml_add(ctx0, emb_scale, conditioning_scale_offset));
+        
+        cur = ggml_add(ctx0, cur, emb_shift);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+        cur = ggml_silu(ctx0, cur);
+
+        float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.timestep_conditioning_integrator_diffusion_layers[c].resblock_out_layers_3_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.timestep_conditioning_integrator_diffusion_layers[c].resblock_out_layers_3_weight->ne)),3,1024,1024);
+        cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,1,1 ));
+        
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.timestep_conditioning_integrator_diffusion_layers[c].resblock_out_layers_3_bias)));
+
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+        cur = ggml_add(ctx0, cur, pass_through);
+        }
+
+        // Attention block
+        {
         //group norm
 
         residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
@@ -2626,44 +2921,44 @@ struct ggml_cgraph * diffusion_graph(
         cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
 
 
-        ggml_format_name(cur, "l%d.norm", i);
 
-        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.latent_conditioner_attention_blocks[i].norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+        
+        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.timestep_conditioning_integrator_diffusion_layers[c].attn_norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
 
 
-        cur = ggml_add(ctx0,cur, model.latent_conditioner_attention_blocks[i].norm_bias);
+        cur = ggml_add(ctx0,cur, model.timestep_conditioning_integrator_diffusion_layers[c].attn_norm_bias);
 
         cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
 
         // qkv
 
 
-        ggml_tensor * float_16_qkv_weight=   ggml_reshape_3d(ctx0, ggml_cpy(ctx0, model.latent_conditioner_attention_blocks[i].qkv_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.latent_conditioner_attention_blocks[i].qkv_weight->ne)), 1,1024, 3072);
-
+        ggml_tensor * float_16_qkv_weight=   ggml_reshape_3d(ctx0, ggml_cpy(ctx0, model.timestep_conditioning_integrator_diffusion_layers[c].attn_qkv_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.timestep_conditioning_integrator_diffusion_layers[c].attn_qkv_weight->ne)), 1,1024, 3072);
+        
 
         cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_qkv_weight, cur, 1,0,1 ));
-
+        
         cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+        
 
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.timestep_conditioning_integrator_diffusion_layers[c].attn_qkv_bias)));
 
-        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.latent_conditioner_attention_blocks[i].qkv_bias)));
-
-        cur = ggml_reshape_3d(ctx0, cur, latent_length, 192, 16);
-
+        cur = ggml_reshape_3d(ctx0, cur, output_sequence_length, 192, 16);
+        
         //derived from ggml reference gpt-2 implementation
-        Q = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, latent_length, 64, 16, cur->nb[1], cur->nb[2], 0));
+        Q = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], 0));
 
-        K = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, latent_length, 64, 16, cur->nb[1], cur->nb[2], latent_length * 64  * ggml_element_size(cur)));
+        K = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], output_sequence_length * 64  * ggml_element_size(cur)));
 
-        V = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, latent_length, 64, 16, cur->nb[1], cur->nb[2], latent_length * 128  * ggml_element_size(cur)));
+        V = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], output_sequence_length * 128  * ggml_element_size(cur)));
 
 
         KQ = ggml_mul_mat(ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,K)),ggml_cont(ctx0,ggml_transpose(ctx0,Q)));
 
-
+        
         KQ_scaled = ggml_scale_inplace(ctx0, KQ, 1.0f/sqrt(float(64)));
-
-        relative_position_bias_weights = ggml_reshape_3d(ctx0, ggml_get_rows(ctx0, model.latent_conditioner_attention_blocks[i].relative_position_embeddings_relative_attention_bias_weight, relative_position_buckets_tensor ), 16, latent_length, latent_length);
+        
+        relative_position_bias_weights = ggml_reshape_3d(ctx0, ggml_get_rows(ctx0, model.timestep_conditioning_integrator_diffusion_layers[c].attn_relative_pos_embeddings_relative_attention_bias_weight, output_relative_position_buckets_tensor ), 16, output_sequence_length, output_sequence_length);
 
         relative_position_bias_weights = ggml_cont(ctx0,ggml_permute(ctx0, relative_position_bias_weights, 2,0,1,3));
         
@@ -2671,596 +2966,374 @@ struct ggml_cgraph * diffusion_graph(
 
 
         cur = ggml_add(ctx0,relative_position_bias_weights, KQ_scaled);
-
+        
 
         cur =  ggml_soft_max_inplace(ctx0, cur);
 
-        cur = ggml_cont(ctx0,(ggml_transpose(ctx0,ggml_reshape_2d(ctx0,ggml_mul_mat(ctx0,cur, V),latent_length, 1024))));
+        cur = ggml_cont(ctx0,(ggml_transpose(ctx0,ggml_reshape_2d(ctx0,ggml_mul_mat(ctx0,cur, V),output_sequence_length, 1024))));
 
 
 
         cur = ggml_mul_mat(ctx0,
-                    model.latent_conditioner_attention_blocks[i].projection_out_weight,
+                    model.timestep_conditioning_integrator_diffusion_layers[c].attn_proj_out_weight,
                     cur);
 
 
         cur = ggml_cont(ctx0,ggml_transpose(ctx0, ggml_add(ctx0,cur,
-                model.latent_conditioner_attention_blocks[i].projection_out_bias)));
+                model.timestep_conditioning_integrator_diffusion_layers[c].attn_proj_out_bias)));
 
 
         cur = ggml_add(ctx0, cur, residual);
+        
 
+        }
+
+    
+
+
+    
 
     }
 
 
-    //code norm (group norm)
 
-    cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+    code_embedding = cur;
 
+    cur = noise_tensor;            
 
-    cur = ggml_group_norm(ctx0, cur, 32);
-
-    cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
 
-    cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+                
+    ggml_tensor * float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.inp_block_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.inp_block_weight->ne)),3,100,1024);
+    cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,1,1 ));
+    
 
-    cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.code_norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
-
-
-    cur = ggml_add(ctx0,cur, model.code_norm_bias);
-
-    cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-    ggml_tensor * offset_conditioning_scale = ggml_add(ctx0, conditioning_scale, conditioning_scale_offset);
-
-    cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-    cur = ggml_mul(ctx0, cur, offset_conditioning_scale);
-
-    cur = ggml_add(ctx0, cur, conditioning_shift);
-
-    cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
 
-    cur = ggml_upscale_ext(ctx0, cur, output_sequence_length, 1024, 1,1);
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.inp_block_bias)));
 
-    ggml_tensor * emb;
 
-    for (int i = 0; i < 1; i ++)
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+    cur = ggml_reshape_2d(ctx0,ggml_concat(ctx0, cur, code_embedding), output_sequence_length, 2048);
+
+    float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.integrating_conv_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.integrating_conv_weight->ne)),1,2048,1024);
+    cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,0,1 ));
+    
+
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.integrating_conv_bias)));
+
+
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+    for(int c = 0; c < 10; c++)
     {
-        
-        emb = time_embedding_tensors[i];
+        // Resblock
 
-        emb = ggml_mul_mat(ctx0,
-                        model.time_emb_linear_0_weight,
-                        emb);
-
-
-
-        emb = ggml_add(ctx0,emb,
-                 model.time_emb_linear_0_bias);
-
-        emb = ggml_silu(ctx0, emb);
-
-
-        emb = ggml_mul_mat(ctx0,
-                        model.time_emb_linear_1_weight,
-                        emb);
-
-
-
-        emb = ggml_add(ctx0,emb,
-                 model.time_emb_linear_1_bias);
-
-        ggml_tensor * time_embedding = emb;
-
-        
-        for (int c = 0; c < 3 ; c++)
         {
+        ggml_tensor * pass_through = cur;
 
-            // Resblock
+        // in_layers
 
-            {
-            ggml_tensor * pass_through = cur;
+        cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-            // in_layers
 
-            cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+        cur = ggml_group_norm(ctx0, cur, 32);
 
+        cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
-            cur = ggml_group_norm(ctx0, cur, 32);
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
 
-            cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.main_diffusion_layers[c].resblock_in_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
 
 
-            cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.timestep_conditioning_integrator_diffusion_layers[c].resblock_in_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+        cur = ggml_add(ctx0,cur, model.main_diffusion_layers[c].resblock_in_layers_0_bias);
 
-
-            cur = ggml_add(ctx0,cur, model.timestep_conditioning_integrator_diffusion_layers[c].resblock_in_layers_0_bias);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-            
-            cur = ggml_silu(ctx0, cur);
-
-            ggml_tensor * float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.timestep_conditioning_integrator_diffusion_layers[c].resblock_in_layers_2_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.timestep_conditioning_integrator_diffusion_layers[c].resblock_in_layers_2_weight->ne)),1,1024,1024);
-            cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,0,1 ));
-            
-
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.timestep_conditioning_integrator_diffusion_layers[c].resblock_in_layers_2_bias)));
-
-
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-            // emb_layers
-
-            ggml_tensor * temp_emb = ggml_silu(ctx0, emb);
-
-
-            temp_emb = ggml_mul_mat(ctx0, temp_emb, model.timestep_conditioning_integrator_diffusion_layers[c].resblock_emb_layers_1_weight);
-
-            temp_emb = ggml_cont(ctx0,ggml_transpose(ctx0, temp_emb));
-
-
-            temp_emb = ggml_add(ctx0,temp_emb,
-                   model.timestep_conditioning_integrator_diffusion_layers[c].resblock_emb_layers_1_bias);
-
-            // out layers
-
-
-            ggml_tensor * emb_scale = ggml_view_1d(ctx0, temp_emb, 1024, 0); 
-            ggml_tensor * emb_shift = ggml_view_1d(ctx0, temp_emb, 1024, ggml_element_size(temp_emb) * 1024);
-
-            cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
-
-            cur = ggml_group_norm(ctx0, cur, 32);
-
-            cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-            cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.timestep_conditioning_integrator_diffusion_layers[c].resblock_out_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
-
-
-            cur = ggml_add(ctx0,cur, model.timestep_conditioning_integrator_diffusion_layers[c].resblock_out_layers_0_bias);
-
-            cur =ggml_mul(ctx0, cur, ggml_add(ctx0, emb_scale, conditioning_scale_offset));
-            
-            cur = ggml_add(ctx0, cur, emb_shift);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-            cur = ggml_silu(ctx0, cur);
-
-            float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.timestep_conditioning_integrator_diffusion_layers[c].resblock_out_layers_3_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.timestep_conditioning_integrator_diffusion_layers[c].resblock_out_layers_3_weight->ne)),3,1024,1024);
-            cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,1,1 ));
-            
-
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.timestep_conditioning_integrator_diffusion_layers[c].resblock_out_layers_3_bias)));
-
-
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-            cur = ggml_add(ctx0, cur, pass_through);
-            }
-
-            // Attention block
-            {
-            //group norm
-
-            residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-            cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
-
-
-            cur = ggml_group_norm(ctx0, cur, 32);
-
-            cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
-
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-
-            ggml_format_name(cur, "l%d.norm", i);
-
-            
-            cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.timestep_conditioning_integrator_diffusion_layers[c].attn_norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
-
-
-            cur = ggml_add(ctx0,cur, model.timestep_conditioning_integrator_diffusion_layers[c].attn_norm_bias);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-            // qkv
-
-
-            ggml_tensor * float_16_qkv_weight=   ggml_reshape_3d(ctx0, ggml_cpy(ctx0, model.timestep_conditioning_integrator_diffusion_layers[c].attn_qkv_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.timestep_conditioning_integrator_diffusion_layers[c].attn_qkv_weight->ne)), 1,1024, 3072);
-            
-
-            cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_qkv_weight, cur, 1,0,1 ));
-            
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-            
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.timestep_conditioning_integrator_diffusion_layers[c].attn_qkv_bias)));
-
-            cur = ggml_reshape_3d(ctx0, cur, output_sequence_length, 192, 16);
-            
-            //derived from ggml reference gpt-2 implementation
-            Q = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], 0));
-
-            K = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], output_sequence_length * 64  * ggml_element_size(cur)));
-
-            V = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], output_sequence_length * 128  * ggml_element_size(cur)));
-
-
-            KQ = ggml_mul_mat(ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,K)),ggml_cont(ctx0,ggml_transpose(ctx0,Q)));
-
-            
-            KQ_scaled = ggml_scale_inplace(ctx0, KQ, 1.0f/sqrt(float(64)));
-            
-            relative_position_bias_weights = ggml_reshape_3d(ctx0, ggml_get_rows(ctx0, model.timestep_conditioning_integrator_diffusion_layers[c].attn_relative_pos_embeddings_relative_attention_bias_weight, output_relative_position_buckets_tensor ), 16, output_sequence_length, output_sequence_length);
-
-            relative_position_bias_weights = ggml_cont(ctx0,ggml_permute(ctx0, relative_position_bias_weights, 2,0,1,3));
-            
-            relative_position_bias_weights = ggml_scale_inplace(ctx0, relative_position_bias_weights, 8.0);
-
-
-            cur = ggml_add(ctx0,relative_position_bias_weights, KQ_scaled);
-            
-
-            cur =  ggml_soft_max_inplace(ctx0, cur);
-
-            cur = ggml_cont(ctx0,(ggml_transpose(ctx0,ggml_reshape_2d(ctx0,ggml_mul_mat(ctx0,cur, V),output_sequence_length, 1024))));
-
-
-
-            cur = ggml_mul_mat(ctx0,
-                        model.timestep_conditioning_integrator_diffusion_layers[c].attn_proj_out_weight,
-                        cur);
-
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, ggml_add(ctx0,cur,
-                    model.timestep_conditioning_integrator_diffusion_layers[c].attn_proj_out_bias)));
-
-
-            cur = ggml_add(ctx0, cur, residual);
-            
-
-            }
-
-           
-
-
-           
-
-        }
- 
-        ggml_tensor * code_embedding = cur;
-
-        cur = noise_tensor;            
-
-        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-
-                    
-        ggml_tensor * float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.inp_block_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.inp_block_weight->ne)),3,100,1024);
-        cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,1,1 ));
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
         
+        cur = ggml_silu(ctx0, cur);
 
-        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-
-        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.inp_block_bias)));
-
-
-        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-        cur = ggml_reshape_2d(ctx0,ggml_concat(ctx0, cur, code_embedding), output_sequence_length, 2048);
-
-        float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.integrating_conv_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.integrating_conv_weight->ne)),1,2048,1024);
+        ggml_tensor * float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.main_diffusion_layers[c].resblock_in_layers_2_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.main_diffusion_layers[c].resblock_in_layers_2_weight->ne)),1,1024,1024);
         cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,0,1 ));
         
 
         cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
 
-        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.integrating_conv_bias)));
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.main_diffusion_layers[c].resblock_in_layers_2_bias)));
 
 
         cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
+        // emb_layers
 
-        for(int c = 0; c < 10; c++)
-        {
-            // Resblock
+        ggml_tensor * temp_emb = ggml_silu(ctx0, time_embedding);
 
-            {
-            ggml_tensor * pass_through = cur;
 
-            // in_layers
+        temp_emb = ggml_mul_mat(ctx0, temp_emb, model.main_diffusion_layers[c].resblock_emb_layers_1_weight);
 
-            cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+        temp_emb = ggml_cont(ctx0,ggml_transpose(ctx0, temp_emb));
 
 
-            cur = ggml_group_norm(ctx0, cur, 32);
+        temp_emb = ggml_add(ctx0,temp_emb,
+                model.main_diffusion_layers[c].resblock_emb_layers_1_bias);
 
-            cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+        // out layers
 
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
 
+        ggml_tensor * emb_scale = ggml_view_1d(ctx0, temp_emb, 1024, 0); 
+        ggml_tensor * emb_shift = ggml_view_1d(ctx0, temp_emb, 1024, ggml_element_size(temp_emb) * 1024);
 
-            cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.main_diffusion_layers[c].resblock_in_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+        cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
+        cur = ggml_group_norm(ctx0, cur, 32);
 
-            cur = ggml_add(ctx0,cur, model.main_diffusion_layers[c].resblock_in_layers_0_bias);
+        cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-            
-            cur = ggml_silu(ctx0, cur);
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
 
-            ggml_tensor * float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.main_diffusion_layers[c].resblock_in_layers_2_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.main_diffusion_layers[c].resblock_in_layers_2_weight->ne)),1,1024,1024);
-            cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,0,1 ));
-            
+        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.main_diffusion_layers[c].resblock_out_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
 
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
+        cur = ggml_add(ctx0,cur, model.main_diffusion_layers[c].resblock_out_layers_0_bias);
 
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.main_diffusion_layers[c].resblock_in_layers_2_bias)));
+        cur =ggml_mul(ctx0, cur, ggml_add(ctx0, emb_scale, conditioning_scale_offset));
+        
+        cur = ggml_add(ctx0, cur, emb_shift);
 
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
 
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+        cur = ggml_silu(ctx0, cur);
 
-            // emb_layers
-
-            ggml_tensor * temp_emb = ggml_silu(ctx0, time_embedding);
-
-
-            temp_emb = ggml_mul_mat(ctx0, temp_emb, model.main_diffusion_layers[c].resblock_emb_layers_1_weight);
-
-            temp_emb = ggml_cont(ctx0,ggml_transpose(ctx0, temp_emb));
-
-
-            temp_emb = ggml_add(ctx0,temp_emb,
-                   model.main_diffusion_layers[c].resblock_emb_layers_1_bias);
-
-            // out layers
-
-
-            ggml_tensor * emb_scale = ggml_view_1d(ctx0, temp_emb, 1024, 0); 
-            ggml_tensor * emb_shift = ggml_view_1d(ctx0, temp_emb, 1024, ggml_element_size(temp_emb) * 1024);
-
-            cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
-
-            cur = ggml_group_norm(ctx0, cur, 32);
-
-            cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-            cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.main_diffusion_layers[c].resblock_out_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
-
-
-            cur = ggml_add(ctx0,cur, model.main_diffusion_layers[c].resblock_out_layers_0_bias);
-
-            cur =ggml_mul(ctx0, cur, ggml_add(ctx0, emb_scale, conditioning_scale_offset));
-            
-            cur = ggml_add(ctx0, cur, emb_shift);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-            cur = ggml_silu(ctx0, cur);
-
-            float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.main_diffusion_layers[c].resblock_out_layers_3_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.main_diffusion_layers[c].resblock_out_layers_3_weight->ne)),3,1024,1024);
-            cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,1,1 ));
-            
-
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.main_diffusion_layers[c].resblock_out_layers_3_bias)));
-
-
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-            cur = ggml_add(ctx0, cur, pass_through);
-            }
-
-            // Attention block
-            {
-            //group norm
-
-            residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-            cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
-
-
-            cur = ggml_group_norm(ctx0, cur, 32);
-
-            cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
-
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-
-            ggml_format_name(cur, "l%d.norm", i);
-
-            
-            cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.main_diffusion_layers[c].attn_norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
-
-
-            cur = ggml_add(ctx0,cur, model.main_diffusion_layers[c].attn_norm_bias);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-            // qkv
-
-
-            ggml_tensor * float_16_qkv_weight=   ggml_reshape_3d(ctx0, ggml_cpy(ctx0, model.main_diffusion_layers[c].attn_qkv_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.main_diffusion_layers[c].attn_qkv_weight->ne)), 1,1024, 3072);
-            
-
-            cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_qkv_weight, cur, 1,0,1 ));
-            
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-            
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.main_diffusion_layers[c].attn_qkv_bias)));
-
-            cur = ggml_reshape_3d(ctx0, cur, output_sequence_length, 192, 16);
-            
-            //derived from ggml reference gpt-2 implementation
-            Q = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], 0));
-
-            K = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], output_sequence_length * 64  * ggml_element_size(cur)));
-
-            V = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], output_sequence_length * 128  * ggml_element_size(cur)));
-
-
-            KQ = ggml_mul_mat(ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,K)),ggml_cont(ctx0,ggml_transpose(ctx0,Q)));
-
-            
-            KQ_scaled = ggml_scale_inplace(ctx0, KQ, 1.0f/sqrt(float(64)));
-            
-            relative_position_bias_weights = ggml_reshape_3d(ctx0, ggml_get_rows(ctx0, model.main_diffusion_layers[c].attn_relative_pos_embeddings_relative_attention_bias_weight, output_relative_position_buckets_tensor ), 16, output_sequence_length, output_sequence_length);
-
-            relative_position_bias_weights = ggml_cont(ctx0,ggml_permute(ctx0, relative_position_bias_weights, 2,0,1,3));
-            
-            relative_position_bias_weights = ggml_scale_inplace(ctx0, relative_position_bias_weights, 8.0);
-
-
-            cur = ggml_add(ctx0,relative_position_bias_weights, KQ_scaled);
-            
-
-            cur =  ggml_soft_max_inplace(ctx0, cur);
-
-            cur = ggml_cont(ctx0,(ggml_transpose(ctx0,ggml_reshape_2d(ctx0,ggml_mul_mat(ctx0,cur, V),output_sequence_length, 1024))));
-
-
-
-            cur = ggml_mul_mat(ctx0,
-                        model.main_diffusion_layers[c].attn_proj_out_weight,
-                        cur);
-
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, ggml_add(ctx0,cur,
-                    model.main_diffusion_layers[c].attn_proj_out_bias)));
-
-
-            cur = ggml_add(ctx0, cur, residual);
-            }
-        }
-
-        // layers 10-12 of main layers
-        for (int c = 0; c < 3; c++)
-        {
-              // Resblock
-
-            ggml_tensor * pass_through = cur;
-
-            // in_layers
-
-            cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
-
-
-            cur = ggml_group_norm(ctx0, cur, 32);
-
-            cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-
-            cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.main_residual_blocks[c].in_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
-
-
-            cur = ggml_add(ctx0,cur, model.main_residual_blocks[c].in_layers_0_bias);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-            
-            cur = ggml_silu(ctx0, cur);
-
-            ggml_tensor * float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.main_residual_blocks[c].in_layers_2_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.main_residual_blocks[c].in_layers_2_weight->ne)),1,1024,1024);
-            cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,0,1 ));
-            
-
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.main_residual_blocks[c].in_layers_2_bias)));
-
-
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-            // emb_layers
-
-            ggml_tensor * temp_emb = ggml_silu(ctx0, time_embedding);
-
-
-            temp_emb = ggml_mul_mat(ctx0, temp_emb, model.main_residual_blocks[c].emb_layers_1_weight);
-
-            temp_emb = ggml_cont(ctx0,ggml_transpose(ctx0, temp_emb));
-
-
-            temp_emb = ggml_add(ctx0,temp_emb,
-                   model.main_residual_blocks[c].emb_layers_1_bias);
-
-            // out layers
-
-
-            ggml_tensor * emb_scale = ggml_view_1d(ctx0, temp_emb, 1024, 0); 
-            ggml_tensor * emb_shift = ggml_view_1d(ctx0, temp_emb, 1024, ggml_element_size(temp_emb) * 1024);
-
-            cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
-
-            cur = ggml_group_norm(ctx0, cur, 32);
-
-            cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-            cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.main_residual_blocks[c].out_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
-
-
-            cur = ggml_add(ctx0,cur, model.main_residual_blocks[c].out_layers_0_bias);
-
-            cur =ggml_mul(ctx0, cur, ggml_add(ctx0, emb_scale, conditioning_scale_offset));
-            
-            cur = ggml_add(ctx0, cur, emb_shift);
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
-
-            cur = ggml_silu(ctx0, cur);
-
-            float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.main_residual_blocks[c].out_layers_3_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.main_residual_blocks[c].out_layers_3_weight->ne)),3,1024,1024);
-            cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,1,1 ));
-            
-
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-
-            cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.main_residual_blocks[c].out_layers_3_bias)));
-
-
-            cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
-
-            cur = ggml_add(ctx0, cur, pass_through);
-            
-        }
+        float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.main_diffusion_layers[c].resblock_out_layers_3_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.main_diffusion_layers[c].resblock_out_layers_3_weight->ne)),3,1024,1024);
+        cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,1,1 ));
         
 
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.main_diffusion_layers[c].resblock_out_layers_3_bias)));
+
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+        cur = ggml_add(ctx0, cur, pass_through);
+        }
+
+        // Attention block
+        {
+        //group norm
+
+        residual = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+        cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+
+
+        cur = ggml_group_norm(ctx0, cur, 32);
+
+        cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+
+        
+        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.main_diffusion_layers[c].attn_norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+
+
+        cur = ggml_add(ctx0,cur, model.main_diffusion_layers[c].attn_norm_bias);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+        // qkv
+
+
+        ggml_tensor * float_16_qkv_weight=   ggml_reshape_3d(ctx0, ggml_cpy(ctx0, model.main_diffusion_layers[c].attn_qkv_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.main_diffusion_layers[c].attn_qkv_weight->ne)), 1,1024, 3072);
+        
+
+        cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_qkv_weight, cur, 1,0,1 ));
+        
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+        
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.main_diffusion_layers[c].attn_qkv_bias)));
+
+        cur = ggml_reshape_3d(ctx0, cur, output_sequence_length, 192, 16);
+        
+        //derived from ggml reference gpt-2 implementation
+        Q = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], 0));
+
+        K = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], output_sequence_length * 64  * ggml_element_size(cur)));
+
+        V = ggml_cont(ctx0,ggml_view_3d(ctx0, cur, output_sequence_length, 64, 16, cur->nb[1], cur->nb[2], output_sequence_length * 128  * ggml_element_size(cur)));
+
+
+        KQ = ggml_mul_mat(ctx0, ggml_cont(ctx0,ggml_transpose(ctx0,K)),ggml_cont(ctx0,ggml_transpose(ctx0,Q)));
+
+        
+        KQ_scaled = ggml_scale_inplace(ctx0, KQ, 1.0f/sqrt(float(64)));
+        
+        relative_position_bias_weights = ggml_reshape_3d(ctx0, ggml_get_rows(ctx0, model.main_diffusion_layers[c].attn_relative_pos_embeddings_relative_attention_bias_weight, output_relative_position_buckets_tensor ), 16, output_sequence_length, output_sequence_length);
+
+        relative_position_bias_weights = ggml_cont(ctx0,ggml_permute(ctx0, relative_position_bias_weights, 2,0,1,3));
+        
+        relative_position_bias_weights = ggml_scale_inplace(ctx0, relative_position_bias_weights, 8.0);
+
+
+        cur = ggml_add(ctx0,relative_position_bias_weights, KQ_scaled);
+        
+
+        cur =  ggml_soft_max_inplace(ctx0, cur);
+
+        cur = ggml_cont(ctx0,(ggml_transpose(ctx0,ggml_reshape_2d(ctx0,ggml_mul_mat(ctx0,cur, V),output_sequence_length, 1024))));
+
+
+
+        cur = ggml_mul_mat(ctx0,
+                    model.main_diffusion_layers[c].attn_proj_out_weight,
+                    cur);
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, ggml_add(ctx0,cur,
+                model.main_diffusion_layers[c].attn_proj_out_bias)));
+
+
+        cur = ggml_add(ctx0, cur, residual);
+        }
     }
 
+    // layers 10-12 of main layers
+    for (int c = 0; c < 3; c++)
+    {
+            // Resblock
+
+        ggml_tensor * pass_through = cur;
+
+        // in_layers
+
+        cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
 
+        cur = ggml_group_norm(ctx0, cur, 32);
+
+        cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+
+        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.main_residual_blocks[c].in_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+
+
+        cur = ggml_add(ctx0,cur, model.main_residual_blocks[c].in_layers_0_bias);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+        
+        cur = ggml_silu(ctx0, cur);
+
+        ggml_tensor * float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.main_residual_blocks[c].in_layers_2_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.main_residual_blocks[c].in_layers_2_weight->ne)),1,1024,1024);
+        cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,0,1 ));
+        
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.main_residual_blocks[c].in_layers_2_bias)));
+
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+        // emb_layers
+
+        ggml_tensor * temp_emb = ggml_silu(ctx0, time_embedding);
+
+
+        temp_emb = ggml_mul_mat(ctx0, temp_emb, model.main_residual_blocks[c].emb_layers_1_weight);
+
+        temp_emb = ggml_cont(ctx0,ggml_transpose(ctx0, temp_emb));
+
+
+        temp_emb = ggml_add(ctx0,temp_emb,
+                model.main_residual_blocks[c].emb_layers_1_bias);
+
+        // out layers
+
+
+        ggml_tensor * emb_scale = ggml_view_1d(ctx0, temp_emb, 1024, 0); 
+        ggml_tensor * emb_shift = ggml_view_1d(ctx0, temp_emb, 1024, ggml_element_size(temp_emb) * 1024);
+
+        cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+
+        cur = ggml_group_norm(ctx0, cur, 32);
+
+        cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+        cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.main_residual_blocks[c].out_layers_0_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+
+
+        cur = ggml_add(ctx0,cur, model.main_residual_blocks[c].out_layers_0_bias);
+
+        cur =ggml_mul(ctx0, cur, ggml_add(ctx0, emb_scale, conditioning_scale_offset));
+        
+        cur = ggml_add(ctx0, cur, emb_shift);
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+        cur = ggml_silu(ctx0, cur);
+
+        float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.main_residual_blocks[c].out_layers_3_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.main_residual_blocks[c].out_layers_3_weight->ne)),3,1024,1024);
+        cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,1,1 ));
+        
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.main_residual_blocks[c].out_layers_3_bias)));
+
+
+        cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+        cur = ggml_add(ctx0, cur, pass_through);
+        
+    }
+    
+
+    cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
+
+    cur = ggml_group_norm(ctx0, cur, 32);
+
+    cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
+
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+    cur = ggml_mul(ctx0, cur,ggml_repeat(ctx0,model.out_group_norm_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne))); 
+
+
+    cur = ggml_add(ctx0,cur, model.out_group_norm_bias);
+    
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0, cur));
+
+    cur = ggml_silu(ctx0, cur);
+
+    float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.out_convolution_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.out_convolution_weight->ne)),3,1024,200);
+    cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,1,1 ));
+    
+
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.out_convolution_bias)));
+
+
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
 
 
@@ -4199,7 +4272,7 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
     
     std::vector<float> latents = std::vector<float>();
 
-    extract_latents_to_vector(  latent_gf->nodes[latent_gf->n_nodes -1] , latents);
+    extract_tensor_to_vector(  latent_gf->nodes[latent_gf->n_nodes -1] , latents);
 
     
 
@@ -4383,6 +4456,77 @@ std::vector<float> generate_timestep_embedding(const std::vector<int>& timesteps
     }
 
     return cos_embedding;
+}
+
+//thanks openchat3.6
+void calculate_model_variance(std::vector<float>& model_var_values, std::vector<float>  & log_variance,
+                               float max_log, float min_log) {
+    log_variance.clear();
+    for (size_t i = 0; i < model_var_values.size(); ++i) {
+        float frac = (model_var_values[i] + 1) / 2;
+        float model_log_variance = frac * max_log + (1 - frac) * min_log;
+        log_variance.push_back(model_log_variance);
+        model_var_values[i] = std::exp(model_log_variance);
+    }
+}
+
+//thanks openchat3.6
+void blend_output_with_unconditioned_output(std::vector<float>& model_output,
+                         const std::vector<float>& model_output_no_conditioning,
+                         float cfk) {
+    for (size_t i = 0; i < model_output.size(); ++i) {
+        model_output[i] = (1 + cfk) * model_output[i] - cfk * model_output_no_conditioning[i];
+    }
+}
+
+
+//thanks openchat3.6
+std::vector<float> predict_xstart_from_eps(float sqrt_recip_alphas_cumprod, float sqrt_recipm1_alphas_cumprod, const std::vector<float>& x, const std::vector<float>& eps) {
+    if (x.size() != eps.size()) {
+        throw std::invalid_argument("The size of the eps vector must be the same as the size of the x vector.");
+    }
+
+    std::vector<float> result(x.size());
+    for (size_t i = 0; i < x.size(); ++i) {
+        result[i] = sqrt_recip_alphas_cumprod * x[i] - sqrt_recipm1_alphas_cumprod * eps[i];
+    }
+    printVector(result, 3, "prior to clamp");
+    for (size_t i = 0; i < x.size(); ++i) {
+        if (result[i] > 1.0)
+        {
+            result[i] = 1.0;
+        }
+        if (result[i] < -1.0)
+        {
+            result[i] = -1.0;
+        }
+    }
+
+
+    return result;
+}
+
+
+std::vector<float> q_posterior_mean(float posterior_mean_coef1, float posterior_mean_coef2, const std::vector<float>& x, const std::vector<float>& x_start) {
+    if (x.size() != x_start.size()) {
+        throw std::invalid_argument("The size of the x_start vector must be the same as the size of the x vector.");
+    }
+
+    std::vector<float> result(x.size());
+    for (size_t i = 0; i < x.size(); ++i) {
+        result[i] = posterior_mean_coef1 * x_start[i] + posterior_mean_coef2 * x[i];
+    }
+
+    return result;
+}
+
+//thanks openchat3.6
+std::vector<float> sample_function(const std::vector<float>& mean, const std::vector<float>& log_variance, std::vector<float>& noise) {
+    std::vector<float> result;
+    for (size_t i = 0; i < mean.size(); ++i) {
+        result.push_back(mean[i] + std::exp(0.5 * log_variance[i]) * noise[i]);
+    }
+    return result;
 }
 
 
@@ -4612,72 +4756,8 @@ int main(int argc, char ** argv) {
 
     std::cout << "reached" << std::endl;
 
-
-    //ggml_backend_t temp_backend = ggml_backend_cuda_init();
-
-    ggml_gallocr_t diffusion_allocr = NULL;
-    // allocate the compute buffer
-
-    diffusion_allocr = ggml_gallocr_new(ggml_backend_get_default_buffer_type(dfsn_model.backend));  
-
-    // alignment required by the backend
-  //  size_t diffusion_align = ggml_backend_get_alignment(dfsn_model.backend);
-  //  std::cout << "alignment" << std::endl;
-   // std::cout << diffusion_align << std::endl;
-    //diffusion_allocr = ggml_allocr_new_measure(diffusion_align);
-    //std::cout << "align created" << std::endl;
-
-    // create the worst case graph for memory usage estimation
-    //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
-    //int n_past = model.hparams.n_ctx - n_tokens;
-    //ggml_allocr_reset(diffusion_allocr);
-    struct ggml_cgraph * measure_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length);
-    //ggml_graph_print(gf);
-
-    std::cout << "graph created" << std::endl;
-    // compute the required memory
-    size_t diffusion_mem_size = ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
-
-    ggml_gallocr_reserve(diffusion_allocr, measure_gf);
-    size_t mem_size =  ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
-    fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
-
-    struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length);
-    ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
-
-
-    struct ggml_tensor * latent_tensor = ggml_graph_get_tensor(diffusion_gf, "input_latent_tensor");      
-           
-    ggml_backend_tensor_set(latent_tensor, trimmed_latents[0].data(), 0, trimmed_latents[0].size()*ggml_element_size(latent_tensor));
-
-    struct ggml_tensor * conditioning_scale_offset_tensor = ggml_graph_get_tensor(diffusion_gf, "conditioning_scale_offset");      
-
-    float offset_val = 1.0;        
-    ggml_backend_tensor_set(conditioning_scale_offset_tensor, &offset_val, 0, ggml_element_size(latent_tensor));
-
-
-
-    std::vector<int> relative_position_buckets = get_relative_position_buckets(trimmed_latents[0].size()/1024);
-
-    struct ggml_tensor * relative_position_buckets_tensor = ggml_graph_get_tensor(diffusion_gf, "relative_position_buckets_tensor");      
-
-    ggml_backend_tensor_set(relative_position_buckets_tensor, relative_position_buckets.data(), 0, (trimmed_latents[0].size()/1024)*(trimmed_latents[0].size()/1024)*ggml_element_size(relative_position_buckets_tensor));
-
-
-
-    std::vector<int> output_relative_position_buckets = get_relative_position_buckets(output_sequence_length);
-
-    struct ggml_tensor * output_relative_position_buckets_tensor = ggml_graph_get_tensor(diffusion_gf, "output_relative_position_buckets_tensor");      
-
-    ggml_backend_tensor_set(output_relative_position_buckets_tensor, output_relative_position_buckets.data(), 0, (output_sequence_length * output_sequence_length)*ggml_element_size(output_relative_position_buckets_tensor));
-
     std::vector<float> noise = sample_diffusion_noise( 100 * output_sequence_length);
     save_f32_vector("./logs/diffusion_noise.bin", noise);
-
-    ggml_tensor * noise_tensor = ggml_graph_get_tensor(diffusion_gf, "noise_tensor");      
-    ggml_backend_tensor_set(noise_tensor, noise.data(), 0, (output_sequence_length * 100)*ggml_element_size(noise_tensor));
-
-
 
 
     std::vector<int> timestep_map = {0, 51, 101, 152, 202, 253, 304, 354, 405, 456, 506, 557, 607, 658, 709, 759, 810, 861, 911, 962, 
@@ -4685,65 +4765,33 @@ int main(int argc, char ** argv) {
     2126, 2177, 2227, 2278, 2329, 2379, 2430, 2480, 2531, 2582, 2632, 2683, 2733, 2784, 2835, 2885, 2936, 2987, 3037, 3088, 3138, 3189, 
     3240, 3290, 3341, 3392, 3442, 3493, 3543, 3594, 3645, 3695, 3746, 3797, 3847, 3898, 3948, 3999};
 
-    // Vector to store vectors of floats
-    std::vector<std::vector<float>> time_embeddings;
-    int max_period = 10000;
-    int dim = 1024;
-
-    // Iterate backwards over the timestep_map
-    for (auto it = timestep_map.rbegin(); it != timestep_map.rend(); ++it) {
-        std::vector<int> timesteps = {*it}; // Create a vector with single timestep
-        std::vector<float> embedding = generate_timestep_embedding(timesteps, dim, max_period);
-        time_embeddings.push_back(embedding);
-    }
-
-    for (int i = 0 ; i < time_embeddings.size(); i ++)
-    {
-        std::cout << "test" <<  i << std::endl;
-        struct ggml_tensor * time_embedding_tensor = ggml_graph_get_tensor(diffusion_gf, ("time_embedding_" + std::to_string(i)).c_str());      
-                std::cout << "test" <<  i << std::endl;
-
-        ggml_backend_tensor_set(time_embedding_tensor, time_embeddings[i].data(), 0, (time_embeddings[i].size() *ggml_element_size(time_embedding_tensor)));
-
-    }
-
-
-    
-    //ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
-    std::cout << "reached computing time" << std::endl;
-    ggml_backend_graph_compute(dfsn_model.backend, diffusion_gf);
-
-
-
-    print_all_tensors(diffusion_gf, false, true, "output");
-    print_all_tensors(diffusion_gf, true, true, "output");
-
-
-
-    
-
-    ggml_gallocr_free(diffusion_allocr);
-
-
-    ggml_free(dfsn_model.ctx);
-
-    
-    ggml_backend_buffer_free(dfsn_model.buffer_w);
-
-    ggml_backend_free(dfsn_model.backend);
-
-
 
 
     std::vector<double> beta_schedule(0);
+
+    int diffusion_timesteps = 80;
+
+    float base_conditioning_free_k = 2.0;
+
      get_beta_schedule(4000, beta_schedule);
  
-    printVector(beta_schedule, 3,  "beta schedule");
+    //printVector(beta_schedule, 3,  "beta schedule");
     
     std::vector<double> alpha_cumulative_products = get_alphas_cumulative_product(beta_schedule);
 
+
+    float last_alpha_cumulative_product = 1.0;
+    beta_schedule.clear();
+
+    for (int i : timestep_map)
+    {
+        beta_schedule.push_back(1 - (alpha_cumulative_products[i] / last_alpha_cumulative_product));
+        last_alpha_cumulative_product = alpha_cumulative_products[i];
+    }
+
+    alpha_cumulative_products = get_alphas_cumulative_product(beta_schedule);
     
-    printVector(alpha_cumulative_products, 3,  "alpha cumulative products");
+    //printVector(alpha_cumulative_products, 3,  "alpha cumulative products");
 
     std::vector<double> alpha_cumulative_products_prev(alpha_cumulative_products.size());
     std::vector<double> alpha_cumulative_products_next(alpha_cumulative_products.size());
@@ -4770,7 +4818,304 @@ int main(int argc, char ** argv) {
     calculate_posterior_mean_coef1(posterior_mean_coef1, beta_schedule, alpha_cumulative_products_prev, alpha_cumulative_products);
     calculate_posterior_mean_coef2(posterior_mean_coef2, alpha_cumulative_products_prev, alpha_cumulative_products, beta_schedule);
 
-    printVector(noise, 3, "diffusion noise");
+    //ggml_backend_t temp_backend = ggml_backend_cuda_init();
+
+
+    std::vector<float> x;
+    x = noise;
+
+    for(int diffusion_index = 0; diffusion_index < 80; diffusion_index++)
+
+    {
+
+        
+
+        ggml_gallocr_t diffusion_allocr = NULL;
+
+
+        std::vector<float> model_output;
+        std::vector<float> model_output_no_conditioning;
+
+        //diffusion with conditioning
+        {
+        diffusion_allocr = ggml_gallocr_new(ggml_backend_get_default_buffer_type(dfsn_model.backend));  
+
+        // alignment required by the backend
+    //  size_t diffusion_align = ggml_backend_get_alignment(dfsn_model.backend);
+    //  std::cout << "alignment" << std::endl;
+    // std::cout << diffusion_align << std::endl;
+        //diffusion_allocr = ggml_allocr_new_measure(diffusion_align);
+        //std::cout << "align created" << std::endl;
+
+        // create the worst case graph for memory usage estimation
+        //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
+        //int n_past = model.hparams.n_ctx - n_tokens;
+        //ggml_allocr_reset(diffusion_allocr);
+        struct ggml_cgraph * measure_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length,diffusion_index, false);
+        //ggml_graph_print(gf);
+
+        std::cout << "graph created" << std::endl;
+        // compute the required memory
+        size_t diffusion_mem_size = ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
+
+        ggml_gallocr_reserve(diffusion_allocr, measure_gf);
+        size_t mem_size =  ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
+        fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
+
+        struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length,diffusion_index,false);
+        ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
+
+
+        struct ggml_tensor * latent_tensor = ggml_graph_get_tensor(diffusion_gf, "input_latent_tensor");      
+            
+        ggml_backend_tensor_set(latent_tensor, trimmed_latents[0].data(), 0, trimmed_latents[0].size()*ggml_element_size(latent_tensor));
+
+        struct ggml_tensor * conditioning_scale_offset_tensor = ggml_graph_get_tensor(diffusion_gf, "conditioning_scale_offset");      
+
+        float offset_val = 1.0;        
+        ggml_backend_tensor_set(conditioning_scale_offset_tensor, &offset_val, 0, ggml_element_size(latent_tensor));
+
+
+
+        std::vector<int> relative_position_buckets = get_relative_position_buckets(trimmed_latents[0].size()/1024);
+
+        struct ggml_tensor * relative_position_buckets_tensor = ggml_graph_get_tensor(diffusion_gf, "relative_position_buckets_tensor");      
+
+        ggml_backend_tensor_set(relative_position_buckets_tensor, relative_position_buckets.data(), 0, (trimmed_latents[0].size()/1024)*(trimmed_latents[0].size()/1024)*ggml_element_size(relative_position_buckets_tensor));
+
+
+
+        std::vector<int> output_relative_position_buckets = get_relative_position_buckets(output_sequence_length);
+
+        struct ggml_tensor * output_relative_position_buckets_tensor = ggml_graph_get_tensor(diffusion_gf, "output_relative_position_buckets_tensor");      
+
+        ggml_backend_tensor_set(output_relative_position_buckets_tensor, output_relative_position_buckets.data(), 0, (output_sequence_length * output_sequence_length)*ggml_element_size(output_relative_position_buckets_tensor));
+
+        ggml_tensor * noise_tensor = ggml_graph_get_tensor(diffusion_gf, "noise_tensor");      
+        ggml_backend_tensor_set(noise_tensor, x.data(), 0, (output_sequence_length * 100)*ggml_element_size(noise_tensor));
+
+
+
+
+
+        // Vector to store vectors of floats
+        std::vector<std::vector<float>> time_embeddings;
+        int max_period = 10000;
+        int dim = 1024;
+
+        // Iterate backwards over the timestep_map
+        for (auto it = timestep_map.rbegin(); it != timestep_map.rend(); ++it) {
+            std::vector<int> timesteps = {*it}; // Create a vector with single timestep
+            std::vector<float> embedding = generate_timestep_embedding(timesteps, dim, max_period);
+            time_embeddings.push_back(embedding);
+        }
+
+        for (int i = 0 ; i < time_embeddings.size(); i ++)
+        {
+            std::cout << "test" <<  i << std::endl;
+            struct ggml_tensor * time_embedding_tensor = ggml_graph_get_tensor(diffusion_gf, ("time_embedding_" + std::to_string(i)).c_str());      
+                    std::cout << "test" <<  i << std::endl;
+
+            ggml_backend_tensor_set(time_embedding_tensor, time_embeddings[i].data(), 0, (time_embeddings[i].size() *ggml_element_size(time_embedding_tensor)));
+
+        }
+
+
+        
+        //ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
+        std::cout << "reached computing time" << std::endl;
+        ggml_backend_graph_compute(dfsn_model.backend, diffusion_gf);
+
+
+        extract_tensor_to_vector(ggml_graph_get_tensor(diffusion_gf, "output"), model_output);
+
+        //print_all_tensors(diffusion_gf, false, true, "output");
+        //print_all_tensors(diffusion_gf, true, true, "output");
+
+
+        ggml_gallocr_free(diffusion_allocr);
+        }
+
+        // diffusion without conditioning
+        {
+        diffusion_allocr = ggml_gallocr_new(ggml_backend_get_default_buffer_type(dfsn_model.backend));  
+
+        // alignment required by the backend
+    //  size_t diffusion_align = ggml_backend_get_alignment(dfsn_model.backend);
+    //  std::cout << "alignment" << std::endl;
+    // std::cout << diffusion_align << std::endl;
+        //diffusion_allocr = ggml_allocr_new_measure(diffusion_align);
+        //std::cout << "align created" << std::endl;
+
+        // create the worst case graph for memory usage estimation
+        //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
+        //int n_past = model.hparams.n_ctx - n_tokens;
+        //ggml_allocr_reset(diffusion_allocr);
+        struct ggml_cgraph * measure_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length,diffusion_index, true);
+        //ggml_graph_print(gf);
+
+        std::cout << "graph created" << std::endl;
+        // compute the required memory
+        size_t diffusion_mem_size = ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
+
+        ggml_gallocr_reserve(diffusion_allocr, measure_gf);
+        size_t mem_size =  ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
+        fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
+
+        struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length,diffusion_index,true);
+        ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
+
+
+        struct ggml_tensor * latent_tensor = ggml_graph_get_tensor(diffusion_gf, "input_latent_tensor");      
+            
+        ggml_backend_tensor_set(latent_tensor, trimmed_latents[0].data(), 0, trimmed_latents[0].size()*ggml_element_size(latent_tensor));
+
+        struct ggml_tensor * conditioning_scale_offset_tensor = ggml_graph_get_tensor(diffusion_gf, "conditioning_scale_offset");      
+
+        float offset_val = 1.0;        
+        ggml_backend_tensor_set(conditioning_scale_offset_tensor, &offset_val, 0, ggml_element_size(latent_tensor));
+
+
+
+        std::vector<int> relative_position_buckets = get_relative_position_buckets(trimmed_latents[0].size()/1024);
+
+        struct ggml_tensor * relative_position_buckets_tensor = ggml_graph_get_tensor(diffusion_gf, "relative_position_buckets_tensor");      
+
+        ggml_backend_tensor_set(relative_position_buckets_tensor, relative_position_buckets.data(), 0, (trimmed_latents[0].size()/1024)*(trimmed_latents[0].size()/1024)*ggml_element_size(relative_position_buckets_tensor));
+
+
+
+        std::vector<int> output_relative_position_buckets = get_relative_position_buckets(output_sequence_length);
+
+        struct ggml_tensor * output_relative_position_buckets_tensor = ggml_graph_get_tensor(diffusion_gf, "output_relative_position_buckets_tensor");      
+
+        ggml_backend_tensor_set(output_relative_position_buckets_tensor, output_relative_position_buckets.data(), 0, (output_sequence_length * output_sequence_length)*ggml_element_size(output_relative_position_buckets_tensor));
+
+
+        ggml_tensor * noise_tensor = ggml_graph_get_tensor(diffusion_gf, "noise_tensor");      
+        ggml_backend_tensor_set(noise_tensor, x.data(), 0, (output_sequence_length * 100)*ggml_element_size(noise_tensor));
+
+
+
+
+
+        // Vector to store vectors of floats
+        std::vector<std::vector<float>> time_embeddings;
+        int max_period = 10000;
+        int dim = 1024;
+
+        // Iterate backwards over the timestep_map
+        for (auto it = timestep_map.rbegin(); it != timestep_map.rend(); ++it) {
+            std::vector<int> timesteps = {*it}; // Create a vector with single timestep
+            std::vector<float> embedding = generate_timestep_embedding(timesteps, dim, max_period);
+            time_embeddings.push_back(embedding);
+        }
+
+        for (int i = 0 ; i < time_embeddings.size(); i ++)
+        {
+            std::cout << "test" <<  i << std::endl;
+            struct ggml_tensor * time_embedding_tensor = ggml_graph_get_tensor(diffusion_gf, ("time_embedding_" + std::to_string(i)).c_str());      
+                    std::cout << "test" <<  i << std::endl;
+
+            ggml_backend_tensor_set(time_embedding_tensor, time_embeddings[i].data(), 0, (time_embeddings[i].size() *ggml_element_size(time_embedding_tensor)));
+
+        }
+
+
+        
+        //ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
+        std::cout << "reached computing time" << std::endl;
+        ggml_backend_graph_compute(dfsn_model.backend, diffusion_gf);
+
+
+
+        //print_all_tensors(diffusion_gf, false, true, "output");
+        //print_all_tensors(diffusion_gf, true, true, "output");
+        
+        
+        extract_tensor_to_vector(ggml_graph_get_tensor(diffusion_gf, "output"), model_output_no_conditioning);
+
+        ggml_gallocr_free(diffusion_allocr);
+        }
+
+        printVector(model_output, 3, "model_output");
+        printVector(model_output_no_conditioning, 3, "model_output_no_conditioning");
+
+
+        int split_index = 100 * output_sequence_length;
+
+
+        std::vector<float> model_output_means(model_output.begin(), model_output.begin() + split_index);
+        std::vector<float> model_output_vars(model_output.begin() + split_index, model_output.end());
+        std::vector<float> model_output_no_conditioning_means(model_output_no_conditioning.begin(), model_output_no_conditioning.begin() + split_index);
+
+
+
+        printVector(model_output_means, 3, "model_output_means");
+        printVector(model_output_no_conditioning_means, 3, "model_output_no_conditioning_means");
+        printVector(model_output_vars, 3, "model_output_vars");
+
+        printVector(posterior_log_variance_clipped, 3, "Posterior Log Variance Clipped");
+
+        std::cout << "curr beta schdule" << std::endl;
+        std::cout << beta_schedule[79-diffusion_index] << std::endl;
+        std::cout << "curr posterior log variance clipped" << std::endl;
+
+
+        float max_log = log(beta_schedule[79-diffusion_index]);
+        std::cout << "max log: " << max_log  << std::endl;
+
+        float min_log = posterior_log_variance_clipped[79-diffusion_index];
+        std::cout << "min log: " << min_log  << std::endl;
+
+        float conditioning_free_k = base_conditioning_free_k *(1 - (float)(79-diffusion_index) / float(diffusion_timesteps));
+        std::cout << "conditioning_free_k: " << conditioning_free_k  << std::endl;
+
+        std::vector<float> model_log_variance;
+
+
+        calculate_model_variance(model_output_vars, model_log_variance,  min_log, max_log);
+        printVector(model_output_vars, 3, "model_output_vars");
+
+        blend_output_with_unconditioned_output(model_output_means, model_output_no_conditioning_means, conditioning_free_k);
+        printVector(model_output_means, 3, "model_output_means");
+
+        std::vector<float> x_start_pred = predict_xstart_from_eps(sqrt_reciprocal_alphas_cumprod[79-diffusion_index] , sqrt_reciprocal_minus_one_alphas_cumprod[79-diffusion_index], x, model_output_means); 
+        printVector(x_start_pred, 3, "x_start_pred");
+
+
+        std::vector<float> final_model_mean = q_posterior_mean(posterior_mean_coef1[79-diffusion_index], posterior_mean_coef2[79-diffusion_index], x, x_start_pred);
+        printVector(final_model_mean, 3, "final_model_mean");
+
+
+        std::vector<float> model_sample;
+        
+        if (79-diffusion_index != 0){
+        model_sample = sample_function(final_model_mean, model_log_variance, noise );
+        }
+        else{
+        model_sample= final_model_mean;
+        }
+        printVector(model_sample, 3, "model_sample");
+        x = model_sample;
+
+
+
+    }
+
+
+    ggml_free(dfsn_model.ctx);
+
+    
+    ggml_backend_buffer_free(dfsn_model.buffer_w);
+
+    ggml_backend_free(dfsn_model.backend);
+
+
+    
+
+
+    //printVector(noise, 3, "diffusion noise");
   
     /*
     printVector(alpha_cumulative_products_prev, 3,  "alpha cumulative products prev");
