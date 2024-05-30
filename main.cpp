@@ -356,6 +356,98 @@ struct diffusion_model{
 
 };
 
+/*                                                                                                                  
+                                                                                                                        
+ ██╗   ██╗ ██████╗  ██████╗ ██████╗ ██████╗ ███████╗██████╗     ████████╗███████╗███╗   ██╗███████╗ ██████╗ ██████╗     
+ ██║   ██║██╔═══██╗██╔════╝██╔═══██╗██╔══██╗██╔════╝██╔══██╗    ╚══██╔══╝██╔════╝████╗  ██║██╔════╝██╔═══██╗██╔══██╗    
+ ██║   ██║██║   ██║██║     ██║   ██║██║  ██║█████╗  ██████╔╝       ██║   █████╗  ██╔██╗ ██║███████╗██║   ██║██████╔╝    
+ ╚██╗ ██╔╝██║   ██║██║     ██║   ██║██║  ██║██╔══╝  ██╔══██╗       ██║   ██╔══╝  ██║╚██╗██║╚════██║██║   ██║██╔══██╗    
+  ╚████╔╝ ╚██████╔╝╚██████╗╚██████╔╝██████╔╝███████╗██║  ██║       ██║   ███████╗██║ ╚████║███████║╚██████╔╝██║  ██║    
+   ╚═══╝   ╚═════╝  ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝       ╚═╝   ╚══════╝╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝    
+                                                                                                                        
+ ███╗   ███╗ █████╗ ███╗   ██╗██╗███████╗███████╗███████╗████████╗                                                      
+ ████╗ ████║██╔══██╗████╗  ██║██║██╔════╝██╔════╝██╔════╝╚══██╔══╝                                                      
+ ██╔████╔██║███████║██╔██╗ ██║██║█████╗  █████╗  ███████╗   ██║                                                         
+ ██║╚██╔╝██║██╔══██║██║╚██╗██║██║██╔══╝  ██╔══╝  ╚════██║   ██║                                                         
+ ██║ ╚═╝ ██║██║  ██║██║ ╚████║██║██║     ███████╗███████║   ██║                                                         
+ ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝╚═╝     ╚══════╝╚══════╝   ╚═╝                                                         
+                                                                                                        
+*/
+
+
+
+struct residual_conv_block{
+    struct ggml_tensor * residual_convs_1_bias;
+    struct ggml_tensor * residual_convs_1_weight;
+
+    struct ggml_tensor * residual_convs_3_bias;
+    struct ggml_tensor * residual_convs_3_weight;
+
+};
+
+
+struct vocoder_residual_block{
+
+    struct ggml_tensor * kernel_predictor_input_convolution_weight;
+    struct ggml_tensor * kernel_predictor_input_convolution_bias;
+
+
+    std::vector<residual_conv_block> kernel_predictor_residual_conv_blocks;
+
+    struct ggml_tensor * kernel_predictor_kernel_convolution_weight;
+    struct ggml_tensor * kernel_predictor_kernel_convolution_bias;
+
+    struct ggml_tensor * kernel_predictor_bias_convolution_weight;
+    struct ggml_tensor * kernel_predictor_bias_convolution_bias;
+
+
+    struct ggml_tensor * conv_blocks_0_1_bias;
+    struct ggml_tensor * conv_blocks_0_1_weight;
+
+    struct ggml_tensor * conv_blocks_1_1_bias;
+    struct ggml_tensor * conv_blocks_1_1_weight;
+
+    struct ggml_tensor * conv_blocks_2_1_bias;
+    struct ggml_tensor * conv_blocks_2_1_weight;
+
+    struct ggml_tensor * conv_blocks_3_1_bias;
+    struct ggml_tensor * conv_blocks_3_1_weight;
+
+};
+
+
+
+struct vocoder_model{
+
+
+
+    struct ggml_tensor * convolution_pre_weight;
+    struct ggml_tensor * convolution_pre_bias;
+
+
+    std::vector<vocoder_residual_block> residual_stack;
+
+
+
+    struct ggml_tensor * convolution_post_weight;
+    struct ggml_tensor * convolution_post_bias;
+
+
+
+    std::map<std::string, struct ggml_tensor *> tensors;
+
+
+    struct ggml_context * ctx;
+
+    ggml_backend_buffer_t buffer_w;
+
+
+    ggml_backend_t backend = NULL;
+
+};
+
+
+
 
 void save_f32_tensor(ggml_tensor * tensor, std::string path_name)
 {
@@ -1383,6 +1475,235 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
 
 
 }
+
+
+/*
+ 
+ ██╗   ██╗ ██████╗  ██████╗ ██████╗ ██████╗ ███████╗██████╗     
+ ██║   ██║██╔═══██╗██╔════╝██╔═══██╗██╔══██╗██╔════╝██╔══██╗    
+ ██║   ██║██║   ██║██║     ██║   ██║██║  ██║█████╗  ██████╔╝    
+ ╚██╗ ██╔╝██║   ██║██║     ██║   ██║██║  ██║██╔══╝  ██╔══██╗    
+  ╚████╔╝ ╚██████╔╝╚██████╗╚██████╔╝██████╔╝███████╗██║  ██║    
+   ╚═══╝   ╚═════╝  ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝    
+                                                                
+ ████████╗███████╗███╗   ██╗███████╗ ██████╗ ██████╗            
+ ╚══██╔══╝██╔════╝████╗  ██║██╔════╝██╔═══██╗██╔══██╗           
+    ██║   █████╗  ██╔██╗ ██║███████╗██║   ██║██████╔╝           
+    ██║   ██╔══╝  ██║╚██╗██║╚════██║██║   ██║██╔══██╗           
+    ██║   ███████╗██║ ╚████║███████║╚██████╔╝██║  ██║           
+    ╚═╝   ╚══════╝╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝           
+                                                                
+ ██╗      ██████╗  █████╗ ██████╗                               
+ ██║     ██╔═══██╗██╔══██╗██╔══██╗                              
+ ██║     ██║   ██║███████║██║  ██║                              
+ ██║     ██║   ██║██╔══██║██║  ██║                              
+ ███████╗╚██████╔╝██║  ██║██████╔╝                              
+ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝                               
+                                                                
+*/
+
+bool vocoder_model_load(const std::string & fname, diffusion_model & model)
+{
+    printf("%s: loading model from '%s'\n", __func__, fname.c_str());
+
+    auto fin = std::ifstream(fname, std::ios::binary);
+    if (!fin) {
+        fprintf(stderr, "%s: failed to open '%s'\n", __func__, fname.c_str());
+        return false;
+    }
+
+      // verify magic
+    {
+        uint32_t magic;
+        fin.read((char *) &magic, sizeof(magic));
+        if (magic != GGML_FILE_MAGIC) {
+            fprintf(stderr, "%s: invalid model file '%s' (bad magic)\n", __func__, fname.c_str());
+            return false;
+        }
+    }
+
+
+
+    size_t buffer_size = 0;
+
+   
+    buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // pre convolution bias
+    buffer_size += 32 * 64 * 7 * ggml_type_sizef(GGML_TYPE_F32); // pre convolution weight
+
+    for (int i = 0; i < 3; i ++)
+    {
+        for (int c = 0; c< 3; c++)
+        {
+
+            buffer_size += 64 * ggml_type_sizef(GGML_TYPE_F32); // res_stack.0.kernel_predictor.residual_convs.0.1.bias
+            buffer_size += 64 * 64 * 3 * ggml_type_sizef(GGML_TYPE_F32); // res_stack.0.kernel_predictor.residual_convs.0.1.weight
+            buffer_size += 64 * ggml_type_sizef(GGML_TYPE_F32); // res_stack.0.kernel_predictor.residual_convs.0.3.bias
+            buffer_size += 64 * 64 * 3 * ggml_type_sizef(GGML_TYPE_F32); // res_stack.0.kernel_predictor.residual_convs.0.3.weight
+
+        }
+
+
+
+
+    }
+
+    buffer_size += ggml_type_sizef(GGML_TYPE_F32); // post convolution bias
+    buffer_size += 32 * 7 * ggml_type_sizef(GGML_TYPE_F32); // post convolution weight
+
+
+
+    printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
+    printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
+
+     struct ggml_init_params params = {
+          ggml_tensor_overhead() * (size_t)(5 + 7*4 + 4 + (3 * 18) + 4 + (10*18) + (3*10) ), //mem size
+           NULL, //mem buffer
+            true, //no alloc
+        };
+
+        std::cout << "lol" << std::endl;
+        model.ctx = ggml_init(params);
+        std::cout << "lol2" << std::endl;
+
+        if (!model.ctx) {
+            fprintf(stderr, "%s: ggml_init() failed\n", __func__);
+            return false;
+        }
+
+
+    // initialize the backend
+#ifdef GGML_USE_CUBLAS
+        fprintf(stderr, "%s: using CUDA backend\n", __func__);
+        model.backend = ggml_backend_cuda_init(0);
+        std::cout << "created backend" << std::endl;
+        if (!model.backend) {
+            fprintf(stderr, "%s: ggml_backend_cuda_init() failed\n", __func__);
+
+        }
+#endif
+
+#ifdef GGML_USE_METAL
+        fprintf(stderr, "%s: using Metal backend\n", __func__);
+        ggml_metal_log_set_callback(ggml_log_callback_default, nullptr);
+        model.backend = ggml_backend_metal_init();
+        if (!model.backend) {
+            fprintf(stderr, "%s: ggml_backend_metal_init() failed\n", __func__);
+        }
+        
+#endif
+
+        if (!model.backend) {
+            // fallback to CPU backend
+            fprintf(stderr, "%s: using CPU backend\n", __func__);
+            model.backend = ggml_backend_cpu_init();
+        }
+
+        if (!model.backend) {
+            fprintf(stderr, "%s: ggml_backend_cpu_init() failed\n", __func__);
+            return false;
+        }
+
+
+        model.buffer_w = ggml_backend_alloc_buffer(model.backend, buffer_size);
+
+
+        auto & ctx = model.ctx;
+
+    
+
+
+
+
+        {
+        //ggml_allocr * alloc = ggml_allocr_new_from_buffer(model.buffer_w);
+        model.buffer_w = ggml_backend_alloc_ctx_tensors(ctx, model.backend);
+
+        size_t total_size = 0;
+
+        bool has_lm_head = false;
+
+        std::vector<char> read_buf;
+
+     while (true) {
+            int32_t n_dims;
+            int32_t length;
+            int32_t ttype;
+
+            fin.read(reinterpret_cast<char *>(&n_dims), sizeof(n_dims));
+            fin.read(reinterpret_cast<char *>(&length), sizeof(length));
+            fin.read(reinterpret_cast<char *>(&ttype),  sizeof(ttype));
+
+            if (fin.eof()) {
+                break;
+            }
+
+            int32_t nelements = 1;
+            int32_t ne[2] = { 1, 1 };
+            for (int i = 0; i < n_dims; ++i) {
+                fin.read(reinterpret_cast<char *>(&ne[i]), sizeof(ne[i]));
+                nelements *= ne[i];
+            }
+
+            std::string name(length, 0);
+            fin.read(&name[0], length);
+
+            if (model.tensors.find(name) == model.tensors.end()) {
+                fprintf(stderr, "%s: unknown tensor '%s' in model file\n", __func__, name.c_str());
+                return false;
+            }
+
+            auto tensor = model.tensors[name];
+            ggml_set_name(tensor, name.c_str());
+            if (ggml_nelements(tensor) != nelements) {
+                fprintf(stderr, "%s: tensor '%s' has wrong size in model file\n", __func__, name.c_str());
+                return false;
+            }
+
+            if (tensor->ne[0] != ne[0] || tensor->ne[1] != ne[1]) {
+                fprintf(stderr, "%s: tensor '%s' has wrong shape in model file: got [%d, %d], expected [%d, %d]\n",
+                        __func__, name.c_str(), (int) tensor->ne[0], (int) tensor->ne[1], ne[0], ne[1]);
+                return false;
+            }
+
+            // for debugging
+            if (0) {
+                printf("%24s - [%5d, %5d], type = %6s, %6.2f MB, %9zu bytes\n", name.c_str(), ne[0], ne[1], ggml_type_name(ggml_type(ttype)), ggml_nbytes(tensor)/1024.0/1024.0, ggml_nbytes(tensor));
+            }
+
+            const size_t bpe = ggml_type_size(ggml_type(ttype));
+
+            if ((nelements*bpe)/ggml_blck_size(tensor->type) != ggml_nbytes(tensor)) {
+                fprintf(stderr, "%s: tensor '%s' has wrong size in model file: got %zu, expected %zu\n",
+                        __func__, name.c_str(), ggml_nbytes(tensor), nelements*bpe);
+                return false;
+            }
+
+            if (ggml_backend_buffer_is_host(model.buffer_w)) {
+                // for some backends such as CPU and Metal, the tensor data is in system memory and we can read directly into it
+                fin.read(reinterpret_cast<char *>(tensor->data), ggml_nbytes(tensor));
+            } else {
+                // read into a temporary buffer first, then copy to device memory
+                read_buf.resize(ggml_nbytes(tensor));
+                fin.read(read_buf.data(), ggml_nbytes(tensor));
+                ggml_backend_tensor_set(tensor, read_buf.data(), 0, ggml_nbytes(tensor));
+            }
+
+    
+
+            total_size += ggml_nbytes(tensor);
+        }
+
+
+        printf("%s: model size  = %8.2f MB\n", __func__, total_size/1024.0/1024.0);
+    }
+
+    fin.close();
+
+    return true;
+
+
+}
+
 
 
 /*
@@ -3916,7 +4237,7 @@ void print_all_tensors(struct ggml_cgraph * gf, bool leaves, bool filter_flag, s
 
 
 
-std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autoregressive(std::string input)
+std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autoregressive(std::vector<gpt_vocab::id> tokens)
 {
 
 
@@ -3924,14 +4245,12 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
     std::cout << "hello world" << std::endl;
     
 
-
-    gpt_vocab vocab;
-    gpt_vocab_init("../models/tokenizer.json", vocab);
-    
-    std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
+    //std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
     //std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // for now, skipping some token processing steps
-    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,17,140,19,142,107,2,115,126,25,2,170,29,64,136,3,0,0", ','); // "Diffusion model complete!"
+
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,135,198,48,167,158,32,3,2,14,34,51,46,20,175,212,76,2,115,126,25,2,170,29,64,136,3,0,0,255,135,198,48,167,158,32,3,2,14,34,51,46,20,175,212,76,2,115,126,25,2,170,29,64,136,3,0,0", ','); //"Congratulations! Autoregressive model complete!"
     //exit(0);
@@ -4324,6 +4643,8 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
 
 }
 
+
+
 //thanks gpt3.5!
 std::vector<double> get_alphas_cumulative_product(const std::vector<double>& betas) {
     std::vector<double> alphas;
@@ -4529,198 +4850,12 @@ std::vector<float> sample_function(const std::vector<float>& mean, const std::ve
     return result;
 }
 
-
-/*
- 
- ████████╗███████╗███████╗████████╗██╗███╗   ██╗ ██████╗ 
- ╚══██╔══╝██╔════╝██╔════╝╚══██╔══╝██║████╗  ██║██╔════╝ 
-    ██║   █████╗  ███████╗   ██║   ██║██╔██╗ ██║██║  ███╗
-    ██║   ██╔══╝  ╚════██║   ██║   ██║██║╚██╗██║██║   ██║
-    ██║   ███████╗███████║   ██║   ██║██║ ╚████║╚██████╔╝
-    ╚═╝   ╚══════╝╚══════╝   ╚═╝   ╚═╝╚═╝  ╚═══╝ ╚═════╝ 
-                                                         
- 
-*/
-
-//thanks gpt3.5!
-std::vector<float> load_f32_vector(const std::string& filename, size_t nBytes) {
-    std::ifstream file(filename, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Error: Unable to open file " << filename << std::endl;
-        return {};
-    }
-
-    // Calculate number of floats to read based on number of bytes
-    size_t numFloats = nBytes / sizeof(float);
-    std::vector<float> floats(numFloats);
-
-    // Read floats from file
-    file.read(reinterpret_cast<char*>(floats.data()), nBytes);
-
-    file.close();
-
-    return floats;
-}
-
-//thanks gpt3.5 !
-void save_f32_vectors(const std::string& filename, const std::vector<std::vector<float>>& vectors) {
-    std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Error: Unable to open file " << filename << " for writing." << std::endl;
-        return;
-    }
-
-
-    // Write each vector
-    for (const auto& vec : vectors) {
-        size_t numFloats = vec.size();        
-        // Write vector elements
-        file.write(reinterpret_cast<const char*>(vec.data()), numFloats * sizeof(float));
-    }
-
-    file.close();
-}
-
-
-void save_f32_vector(const std::string& filename, const std::vector<float>& vector) {
-    std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Error: Unable to open file " << filename << " for writing." << std::endl;
-        return;
-    }
-
-    // Write each vector
-    size_t numFloats = vector.size();        
-    // Write vector elements
-    file.write(reinterpret_cast<const char*>(vector.data()), numFloats * sizeof(float));
-    
-
-    file.close();
-}
+std::vector<float> diffusion(std::vector<float> trimmed_latents)
+{
 
 
 
-
-
-//thanks gpt3.5 !
-bool latent_vectors_match(const std::vector<std::vector<float>>& vec_of_vecs, const std::vector<float>& other_vec) {
-    // Flatten the vector of vectors
-    std::vector<float> flattened;
-    for (const auto& inner_vec : vec_of_vecs) {
-        flattened.insert(flattened.end(), inner_vec.begin(), inner_vec.end());
-    }
-
-    // Check if lengths match
-    if (flattened.size() != other_vec.size()) {
-        std::cout << "size problem" << std::endl;
-        return false;
-    }
-
-    // Check if each entry matches
-    for (int i = 0; i < flattened.size(); i ++)
-    {
-        //std::cout << std::to_string(i) + ": "  << flattened[i]  << " " << other_vec[i] << std::endl;
-        if (abs(flattened[i] -other_vec[i]) >.01)
-        {
-            std::cout << flattened[i] << ":" << other_vec[i] << std::endl;
-           return false;
-        }
-    }
-
-    return true;
-}
-
-
-
-bool mel_code_vectors_match(const std::vector<std::vector<int>>& vec1, const std::vector<std::vector<int>>& vec2) {
-    if (vec1.size() != vec2.size()) {
-        return false;
-    }
-
-    for (size_t i = 0; i < vec1.size(); ++i) {
-        if (vec1[i].size() != vec2[i].size()) {
-            std::cout << "size: " << vec1[i].size() << " " << vec2[i].size() << std::endl;
-            return false;
-        }
-
-        for (size_t j = 0; j < vec1[i].size(); ++j) {
-            if (vec1[i][j] != vec2[i][j]) {
-                return false;
-            }
-        }
-    }
-
-    return true;
-}
-
-
-void test_autoregressive(){
-
-
-    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive("placeholder");
-    
-    std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
-    std::vector<std::vector<int>> sequences = autoregressive_result.second;
-
-    int trimmed_latents_size = 0;
-    for (std::vector<float> trimmed_latent : trimmed_latents){
-        trimmed_latents_size += trimmed_latent.size();
-    }
-
-
-
-    //save_f32_vectors("../assets/target_trimmed_latents.bin", trimmed_latents);
-    std::vector<float> target_trimmed_latents = load_f32_vector("../assets/target_trimmed_latents.bin" , trimmed_latents_size * sizeof(float)); // 4 is the number of bytes in a float.
-
-    std::vector<std::vector<int>> target_sequences ={{8, 7406, 6450, 1601, 2061, 4389, 4954, 134, 1554, 372, 3666, 1580, 20, 83, 45, 8, 248, 8012, 2483, 7396, 37, 7784, 3008, 1126, 283, 1609, 2376, 2061, 4992, 3330, 1350, 469, 1022, 7005, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248},
-{45, 7005, 5594, 944, 4825, 3487, 4389, 1272, 456, 2068, 4685, 1981, 1656, 1580, 20, 45, 7406, 3386, 3932, 2483, 7683, 6893, 7136, 3221, 3069, 734, 511, 485, 1105, 1805, 4040, 2613, 386, 497, 152, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248},
-{20, 299, 7184, 2968, 3633, 3487, 7358, 1272, 670, 1356, 670, 372, 1511, 1970, 8, 20, 45, 7005, 1293, 655, 2681, 7824, 779, 7746, 758, 1417, 734, 5124, 1167, 4879, 815, 1327, 2793, 4726, 3899, 1000, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248},
-{8, 7406, 5978, 1601, 3487, 6693, 3893, 2603, 1100, 612, 7403, 4584, 8, 20, 45, 83, 45, 299, 2867, 1197, 230, 2071, 2283, 6497, 7683, 1084, 4357, 492, 1265, 1835, 2021, 989, 2929, 2159, 1374, 7005, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248}};
-
-    if (!mel_code_vectors_match(sequences, target_sequences))
-    {
-        std::cout << "token sequence mismatch" << std::endl;
-        exit(1);
-    }
-
-    if (!latent_vectors_match(trimmed_latents, target_trimmed_latents))
-    {
-        std::cout << "trimmed latent mismatch" << std::endl;
-        exit(1);
-    }
-
-    std::cout << "AUTOREGRESSIVE TEST SUCCESS!" << std::endl;
-
-}
-
-
-
-
-/*
- 
- ███╗   ███╗ █████╗ ██╗███╗   ██╗
- ████╗ ████║██╔══██╗██║████╗  ██║
- ██╔████╔██║███████║██║██╔██╗ ██║
- ██║╚██╔╝██║██╔══██║██║██║╚██╗██║
- ██║ ╚═╝ ██║██║  ██║██║██║ ╚████║
- ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
-                                 
- 
-*/
-
-int main(int argc, char ** argv) {
-
-    //test_autoregressive();
-    //exit(0);
-    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive("placeholder");
-    
-    std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
-    std::vector<std::vector<int>> sequences = autoregressive_result.second;
-
-
-
-
-    int length = trimmed_latents[0].size() / 1024;
+    int length = trimmed_latents.size() / 1024;
     int output_sequence_length = length * 4 * 24000 / 22050 ;
 
 
@@ -4757,7 +4892,7 @@ int main(int argc, char ** argv) {
     std::cout << "reached" << std::endl;
 
     std::vector<float> noise = sample_diffusion_noise( 100 * output_sequence_length);
-    save_f32_vector("./logs/diffusion_noise.bin", noise);
+    //save_f32_vector("./logs/diffusion_noise.bin", noise);
 
 
     std::vector<int> timestep_map = {0, 51, 101, 152, 202, 253, 304, 354, 405, 456, 506, 557, 607, 658, 709, 759, 810, 861, 911, 962, 
@@ -4851,7 +4986,7 @@ int main(int argc, char ** argv) {
         //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
         //int n_past = model.hparams.n_ctx - n_tokens;
         //ggml_allocr_reset(diffusion_allocr);
-        struct ggml_cgraph * measure_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length,diffusion_index, false);
+        struct ggml_cgraph * measure_gf = diffusion_graph( dfsn_model, trimmed_latents, output_sequence_length,diffusion_index, false);
         //ggml_graph_print(gf);
 
         std::cout << "graph created" << std::endl;
@@ -4862,13 +4997,13 @@ int main(int argc, char ** argv) {
         size_t mem_size =  ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
         fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
 
-        struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length,diffusion_index,false);
+        struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model, trimmed_latents, output_sequence_length,diffusion_index,false);
         ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
 
 
         struct ggml_tensor * latent_tensor = ggml_graph_get_tensor(diffusion_gf, "input_latent_tensor");      
             
-        ggml_backend_tensor_set(latent_tensor, trimmed_latents[0].data(), 0, trimmed_latents[0].size()*ggml_element_size(latent_tensor));
+        ggml_backend_tensor_set(latent_tensor, trimmed_latents.data(), 0, trimmed_latents.size()*ggml_element_size(latent_tensor));
 
         struct ggml_tensor * conditioning_scale_offset_tensor = ggml_graph_get_tensor(diffusion_gf, "conditioning_scale_offset");      
 
@@ -4877,11 +5012,11 @@ int main(int argc, char ** argv) {
 
 
 
-        std::vector<int> relative_position_buckets = get_relative_position_buckets(trimmed_latents[0].size()/1024);
+        std::vector<int> relative_position_buckets = get_relative_position_buckets(trimmed_latents.size()/1024);
 
         struct ggml_tensor * relative_position_buckets_tensor = ggml_graph_get_tensor(diffusion_gf, "relative_position_buckets_tensor");      
 
-        ggml_backend_tensor_set(relative_position_buckets_tensor, relative_position_buckets.data(), 0, (trimmed_latents[0].size()/1024)*(trimmed_latents[0].size()/1024)*ggml_element_size(relative_position_buckets_tensor));
+        ggml_backend_tensor_set(relative_position_buckets_tensor, relative_position_buckets.data(), 0, (trimmed_latents.size()/1024)*(trimmed_latents.size()/1024)*ggml_element_size(relative_position_buckets_tensor));
 
 
 
@@ -4951,7 +5086,7 @@ int main(int argc, char ** argv) {
         //int n_tokens = std::min(model.hparams.n_ctx, params.n_batch);
         //int n_past = model.hparams.n_ctx - n_tokens;
         //ggml_allocr_reset(diffusion_allocr);
-        struct ggml_cgraph * measure_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length,diffusion_index, true);
+        struct ggml_cgraph * measure_gf = diffusion_graph( dfsn_model, trimmed_latents, output_sequence_length,diffusion_index, true);
         //ggml_graph_print(gf);
 
         std::cout << "graph created" << std::endl;
@@ -4962,13 +5097,13 @@ int main(int argc, char ** argv) {
         size_t mem_size =  ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
         fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
 
-        struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model, trimmed_latents[0], output_sequence_length,diffusion_index,true);
+        struct ggml_cgraph * diffusion_gf = diffusion_graph( dfsn_model, trimmed_latents, output_sequence_length,diffusion_index,true);
         ggml_gallocr_alloc_graph(diffusion_allocr, diffusion_gf);
 
 
         struct ggml_tensor * latent_tensor = ggml_graph_get_tensor(diffusion_gf, "input_latent_tensor");      
             
-        ggml_backend_tensor_set(latent_tensor, trimmed_latents[0].data(), 0, trimmed_latents[0].size()*ggml_element_size(latent_tensor));
+        ggml_backend_tensor_set(latent_tensor, trimmed_latents.data(), 0, trimmed_latents.size()*ggml_element_size(latent_tensor));
 
         struct ggml_tensor * conditioning_scale_offset_tensor = ggml_graph_get_tensor(diffusion_gf, "conditioning_scale_offset");      
 
@@ -4977,11 +5112,11 @@ int main(int argc, char ** argv) {
 
 
 
-        std::vector<int> relative_position_buckets = get_relative_position_buckets(trimmed_latents[0].size()/1024);
+        std::vector<int> relative_position_buckets = get_relative_position_buckets(trimmed_latents.size()/1024);
 
         struct ggml_tensor * relative_position_buckets_tensor = ggml_graph_get_tensor(diffusion_gf, "relative_position_buckets_tensor");      
 
-        ggml_backend_tensor_set(relative_position_buckets_tensor, relative_position_buckets.data(), 0, (trimmed_latents[0].size()/1024)*(trimmed_latents[0].size()/1024)*ggml_element_size(relative_position_buckets_tensor));
+        ggml_backend_tensor_set(relative_position_buckets_tensor, relative_position_buckets.data(), 0, (trimmed_latents.size()/1024)*(trimmed_latents.size()/1024)*ggml_element_size(relative_position_buckets_tensor));
 
 
 
@@ -5105,7 +5240,6 @@ int main(int argc, char ** argv) {
 
     }
 
-    save_f32_vector("./logs/mel.bin", x);
 
 
 
@@ -5117,33 +5251,259 @@ int main(int argc, char ** argv) {
     ggml_backend_free(dfsn_model.backend);
 
 
-    
 
 
-    //printVector(noise, 3, "diffusion noise");
-  
-    /*
-    printVector(alpha_cumulative_products_prev, 3,  "alpha cumulative products prev");
-    printVector(alpha_cumulative_products_next, 3,  "alpha cumulative product next");
+    return x;
 
-    printVector(sqrt_alphas_cumprod, 3,  "sqrt_alphas_cumprod");
-    printVector(sqrt_one_minus_alphas_cumprod, 3,  "sqrt_one_minus_alphas_cumprod");
-    printVector(log_one_minus_alphas_cumprod, 3,  "log_one_minus_alphas_cumprod");
-    printVector(sqrt_reciprocal_alphas_cumprod, 3,  "sqrt_reciprocal_alphas_cumprod");
-    printVector(sqrt_reciprocal_minus_one_alphas_cumprod, 3,  "sqrt_reciprocal_minus_one_alphas_cumprod");
+}
 
-    printVector(posterior_variance, 3, "Posterior Variance");
-    printVector(posterior_log_variance_clipped, 3, "Posterior Log Variance Clipped");
-    printVector(posterior_mean_coef1, 3, "Posterior Mean Coef1");
-    printVector(posterior_mean_coef2, 3, "Posterior Mean Coef2");
-    
-    for (int i = 0; i < time_embeddings.size(); i ++)
-    {
-        printVector(time_embeddings[i], 3,  "time embeddings:" + std::to_string(i));
 
+
+/*
+ 
+ ████████╗███████╗███████╗████████╗██╗███╗   ██╗ ██████╗ 
+ ╚══██╔══╝██╔════╝██╔════╝╚══██╔══╝██║████╗  ██║██╔════╝ 
+    ██║   █████╗  ███████╗   ██║   ██║██╔██╗ ██║██║  ███╗
+    ██║   ██╔══╝  ╚════██║   ██║   ██║██║╚██╗██║██║   ██║
+    ██║   ███████╗███████║   ██║   ██║██║ ╚████║╚██████╔╝
+    ╚═╝   ╚══════╝╚══════╝   ╚═╝   ╚═╝╚═╝  ╚═══╝ ╚═════╝ 
+                                                         
+ 
+*/
+
+//thanks gpt3.5!
+std::vector<float> load_f32_vector(const std::string& filename, size_t nBytes) {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Unable to open file " << filename << std::endl;
+        return {};
     }
 
-    */
+    // Calculate number of floats to read based on number of bytes
+    size_t numFloats = nBytes / sizeof(float);
+    std::vector<float> floats(numFloats);
+
+    // Read floats from file
+    file.read(reinterpret_cast<char*>(floats.data()), nBytes);
+
+    file.close();
+
+    return floats;
+}
+
+//thanks gpt3.5 !
+void save_f32_vectors(const std::string& filename, const std::vector<std::vector<float>>& vectors) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Unable to open file " << filename << " for writing." << std::endl;
+        return;
+    }
+
+
+    // Write each vector
+    for (const auto& vec : vectors) {
+        size_t numFloats = vec.size();        
+        // Write vector elements
+        file.write(reinterpret_cast<const char*>(vec.data()), numFloats * sizeof(float));
+    }
+
+    file.close();
+}
+
+
+void save_f32_vector(const std::string& filename, const std::vector<float>& vector) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Unable to open file " << filename << " for writing." << std::endl;
+        return;
+    }
+
+    // Write each vector
+    size_t numFloats = vector.size();        
+    // Write vector elements
+    file.write(reinterpret_cast<const char*>(vector.data()), numFloats * sizeof(float));
+    
+
+    file.close();
+}
+
+
+
+
+
+//thanks gpt3.5 !
+bool latent_vectors_match(const std::vector<std::vector<float>>& vec_of_vecs, const std::vector<float>& other_vec) {
+    // Flatten the vector of vectors
+    std::vector<float> flattened;
+    for (const auto& inner_vec : vec_of_vecs) {
+        flattened.insert(flattened.end(), inner_vec.begin(), inner_vec.end());
+    }
+
+    // Check if lengths match
+    if (flattened.size() != other_vec.size()) {
+        std::cout << "size problem" << std::endl;
+        return false;
+    }
+
+    // Check if each entry matches
+    for (int i = 0; i < flattened.size(); i ++)
+    {
+        //std::cout << std::to_string(i) + ": "  << flattened[i]  << " " << other_vec[i] << std::endl;
+        if (abs(flattened[i] -other_vec[i]) >.01)
+        {
+            std::cout << flattened[i] << ":" << other_vec[i] << std::endl;
+           return false;
+        }
+    }
+
+    return true;
+}
+
+//thanks gpt 3.6
+bool vectors_match(const std::vector<float>& vec1, const std::vector<float>& vec2) {
+    // Check if lengths match
+    if (vec1.size() != vec2.size()) {
+        std::cout << "size problem" << std::endl;
+        return false;
+    }
+
+    // Check if each entry matches
+    for (int i = 0; i < vec1.size(); i++) {
+        if (abs(vec1[i] - vec2[i]) > .01) {
+            std::cout << "i: " << i << std::endl;
+            std::cout << vec1[i] << ":" << vec2[i] <<std::endl;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+bool mel_code_vectors_match(const std::vector<std::vector<int>>& vec1, const std::vector<std::vector<int>>& vec2) {
+    if (vec1.size() != vec2.size()) {
+        return false;
+    }
+
+    for (size_t i = 0; i < vec1.size(); ++i) {
+        if (vec1[i].size() != vec2[i].size()) {
+            std::cout << "size: " << vec1[i].size() << " " << vec2[i].size() << std::endl;
+            return false;
+        }
+
+        for (size_t j = 0; j < vec1[i].size(); ++j) {
+            if (vec1[i][j] != vec2[i][j]) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+
+void test_autoregressive(){
+
+
+    std::vector<gpt_vocab::id> tokens =  ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
+
+    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive(tokens);
+    
+    std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
+    std::vector<std::vector<int>> sequences = autoregressive_result.second;
+
+    int trimmed_latents_size = 0;
+    for (std::vector<float> trimmed_latent : trimmed_latents){
+        trimmed_latents_size += trimmed_latent.size();
+    }
+
+
+
+    //save_f32_vectors("../assets/target_trimmed_latents.bin", trimmed_latents);
+    std::vector<float> target_trimmed_latents = load_f32_vector("../assets/target_trimmed_latents.bin" , trimmed_latents_size * sizeof(float)); // 4 is the number of bytes in a float.
+
+    std::vector<std::vector<int>> target_sequences ={{8, 7406, 6450, 1601, 2061, 4389, 4954, 134, 1554, 372, 3666, 1580, 20, 83, 45, 8, 248, 8012, 2483, 7396, 37, 7784, 3008, 1126, 283, 1609, 2376, 2061, 4992, 3330, 1350, 469, 1022, 7005, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248},
+{45, 7005, 5594, 944, 4825, 3487, 4389, 1272, 456, 2068, 4685, 1981, 1656, 1580, 20, 45, 7406, 3386, 3932, 2483, 7683, 6893, 7136, 3221, 3069, 734, 511, 485, 1105, 1805, 4040, 2613, 386, 497, 152, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248},
+{20, 299, 7184, 2968, 3633, 3487, 7358, 1272, 670, 1356, 670, 372, 1511, 1970, 8, 20, 45, 7005, 1293, 655, 2681, 7824, 779, 7746, 758, 1417, 734, 5124, 1167, 4879, 815, 1327, 2793, 4726, 3899, 1000, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248},
+{8, 7406, 5978, 1601, 3487, 6693, 3893, 2603, 1100, 612, 7403, 4584, 8, 20, 45, 83, 45, 299, 2867, 1197, 230, 2071, 2283, 6497, 7683, 1084, 4357, 492, 1265, 1835, 2021, 989, 2929, 2159, 1374, 7005, 8193, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 83, 45, 45, 248}};
+
+    if (!mel_code_vectors_match(sequences, target_sequences))
+    {
+        std::cout << "token sequence mismatch" << std::endl;
+        exit(1);
+    }
+
+    if (!latent_vectors_match(trimmed_latents, target_trimmed_latents))
+    {
+        std::cout << "trimmed latent mismatch" << std::endl;
+        exit(1);
+    }
+
+    std::cout << "AUTOREGRESSIVE TEST SUCCESS!" << std::endl;
+
+}
+
+void test_diffusion(){
+
+    std::vector<float> diffusion_input  = load_f32_vector("../assets/diffusion_input.bin" , 44032 * sizeof(float)); 
+    std::vector<float> target_mel  = load_f32_vector("../assets/target_mel.bin" , 18700 * sizeof(float)); 
+    std::vector<float> mel = diffusion(diffusion_input);
+    if (!vectors_match(target_mel, mel))
+    {
+        std::cout << "mel mismatch" << std::endl;
+        exit(1);
+    }
+
+    std::cout << "DIFFUSION TEST SUCCESS!" << std::endl;
+
+
+}
+
+
+
+
+/*
+ 
+ ███╗   ███╗ █████╗ ██╗███╗   ██╗
+ ████╗ ████║██╔══██╗██║████╗  ██║
+ ██╔████╔██║███████║██║██╔██╗ ██║
+ ██║╚██╔╝██║██╔══██║██║██║╚██╗██║
+ ██║ ╚═╝ ██║██║  ██║██║██║ ╚████║
+ ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
+                                 
+ 
+*/
+
+int main(int argc, char ** argv) {
+
+
+
+
+    gpt_vocab vocab;
+    gpt_vocab_init("../models/tokenizer.json", vocab);
+    
+
+    //test_autoregressive();
+    //test_diffusion();
+    //exit(0);
+
+
+    
+    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
+
+
+    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive(tokens);
+    
+    std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
+    std::vector<std::vector<int>> sequences = autoregressive_result.second;
+
+
+    std::vector<float> mel = diffusion(trimmed_latents[0]);
+
+    save_f32_vector("./logs/diffusion_input.bin", trimmed_latents[0]);
+    std::cout << trimmed_latents[0].size() <<std::endl;
+    save_f32_vector("./logs/mel.bin", mel);
+    std::cout << mel.size() <<std::endl;
 
     return 0;
   
