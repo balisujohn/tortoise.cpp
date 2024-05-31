@@ -1553,7 +1553,7 @@ bool vocoder_model_load(const std::string & fname, vocoder_model & model)
         buffer_size += 256 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.bias_conv.bias
         buffer_size += 256 * 64 * 3 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.bias_conv.weight
 
-        if (i >2)
+        if (i <2)
         {
         buffer_size += 32 * 32 * 16 * ggml_type_sizef(GGML_TYPE_F32); // convt_pre.1.weight
         }
@@ -1561,7 +1561,7 @@ bool vocoder_model_load(const std::string & fname, vocoder_model & model)
         {
         buffer_size += 32 * 32 * 8 * ggml_type_sizef(GGML_TYPE_F32); // convt_pre.1.weight
         }
-        
+
         buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // convt_pre.1.bias
         buffer_size += 32 * 32 * 3 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.0.1.weight
         buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.0.1.bias
