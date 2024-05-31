@@ -400,6 +400,10 @@ struct vocoder_residual_block{
     struct ggml_tensor * kernel_predictor_bias_convolution_weight;
     struct ggml_tensor * kernel_predictor_bias_convolution_bias;
 
+    struct ggml_tensor * convolution_t_pre_weight;
+    struct ggml_tensor * convolution_t_pre_bias;
+
+
 
     struct ggml_tensor * conv_blocks_0_1_bias;
     struct ggml_tensor * conv_blocks_0_1_weight;
@@ -1502,7 +1506,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
                                                                 
 */
 
-bool vocoder_model_load(const std::string & fname, diffusion_model & model)
+bool vocoder_model_load(const std::string & fname, vocoder_model & model)
 {
     printf("%s: loading model from '%s'\n", __func__, fname.c_str());
 
@@ -1532,17 +1536,33 @@ bool vocoder_model_load(const std::string & fname, diffusion_model & model)
 
     for (int i = 0; i < 3; i ++)
     {
+        buffer_size += 64 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.input_conv.0.bias
+        buffer_size += 64 * 100 * 5 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.input_conv.0.weight
+
         for (int c = 0; c< 3; c++)
         {
 
-            buffer_size += 64 * ggml_type_sizef(GGML_TYPE_F32); // res_stack.0.kernel_predictor.residual_convs.0.1.bias
-            buffer_size += 64 * 64 * 3 * ggml_type_sizef(GGML_TYPE_F32); // res_stack.0.kernel_predictor.residual_convs.0.1.weight
-            buffer_size += 64 * ggml_type_sizef(GGML_TYPE_F32); // res_stack.0.kernel_predictor.residual_convs.0.3.bias
-            buffer_size += 64 * 64 * 3 * ggml_type_sizef(GGML_TYPE_F32); // res_stack.0.kernel_predictor.residual_convs.0.3.weight
-
+            buffer_size += 64 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.residual_convs.0.1.bias
+            buffer_size += 64 * 64 * 3 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.residual_convs.0.1.weight
+            buffer_size += 64 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.residual_convs.0.3.bias
+            buffer_size += 64 * 64 * 3 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.residual_convs.0.3.weight
         }
+    
+        buffer_size += 24576 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.kernel_conv.bias
+        buffer_size += 24576 * 64 * 3 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.kernel_conv.weight
+        buffer_size += 256 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.bias_conv.bias
+        buffer_size += 256 * 64 * 3 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.bias_conv.weight
 
-
+        buffer_size += 32 * 32 * 16 * ggml_type_sizef(GGML_TYPE_F32); // convt_pre.1.weight
+        buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // convt_pre.1.bias
+        buffer_size += 32 * 32 * 3 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.0.1.weight
+        buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.0.1.bias
+        buffer_size += 32 * 32 * 3 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.1.1.weight
+        buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.1.1.bias
+        buffer_size += 32 * 32 * 3 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.2.1.weight
+        buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.2.1.bias
+        buffer_size += 32 * 32 * 3 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.3.1.weight
+        buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.3.1.bias
 
 
     }
@@ -1556,7 +1576,7 @@ bool vocoder_model_load(const std::string & fname, diffusion_model & model)
     printf("%s: backend buffer size = %6.2f MB\n", __func__, buffer_size/(1024.0*1024.0));
 
      struct ggml_init_params params = {
-          ggml_tensor_overhead() * (size_t)(5 + 7*4 + 4 + (3 * 18) + 4 + (10*18) + (3*10) ), //mem size
+          ggml_tensor_overhead() * (size_t)(177), //mem size
            NULL, //mem buffer
             true, //no alloc
         };
@@ -1607,9 +1627,77 @@ bool vocoder_model_load(const std::string & fname, diffusion_model & model)
         model.buffer_w = ggml_backend_alloc_buffer(model.backend, buffer_size);
 
 
-        auto & ctx = model.ctx;
+    auto & ctx = model.ctx;
 
-    
+    model.convolution_pre_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
+    model.convolution_pre_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 7, 64, 32);
+
+    model.residual_stack.resize(3);
+    for (int i = 0; i < 3; i++) {
+        model.residual_stack[i].kernel_predictor_input_convolution_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 64);
+        model.residual_stack[i].kernel_predictor_input_convolution_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 5, 100, 64);
+
+        model.residual_stack[i].kernel_predictor_residual_conv_blocks.resize(3);
+        for (int c = 0; c < 3; c++) {
+            model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 64);
+            model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_1_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 64, 64);
+            model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_3_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 64);
+            model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_3_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 64, 64);
+
+            model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.residual_convs." + std::to_string(c) + ".1.bias"] = model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_1_bias;
+            model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.residual_convs." + std::to_string(c) + ".1.weight"] = model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_1_weight;
+            model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.residual_convs." + std::to_string(c) + ".3.bias"] = model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_3_bias;
+            model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.residual_convs." + std::to_string(c) + ".3.weight"] = model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_3_weight;
+        }
+
+        model.residual_stack[i].kernel_predictor_kernel_convolution_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 24576);
+        model.residual_stack[i].kernel_predictor_kernel_convolution_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3,64,24576);
+        model.residual_stack[i].kernel_predictor_bias_convolution_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 256);
+        model.residual_stack[i].kernel_predictor_bias_convolution_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3,64,256);
+
+        if (i < 2)
+        {
+            model.residual_stack[i].convolution_t_pre_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 16, 32, 32);
+        }
+        else
+        {
+            model.residual_stack[i].convolution_t_pre_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 8, 32, 32);
+        }
+        model.residual_stack[i].convolution_t_pre_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
+        model.residual_stack[i].conv_blocks_0_1_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 32, 32);
+        model.residual_stack[i].conv_blocks_0_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
+        model.residual_stack[i].conv_blocks_1_1_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 32, 32);
+        model.residual_stack[i].conv_blocks_1_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
+        model.residual_stack[i].conv_blocks_2_1_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 32, 32);
+        model.residual_stack[i].conv_blocks_2_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
+        model.residual_stack[i].conv_blocks_3_1_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3,  32, 32);
+        model.residual_stack[i].conv_blocks_3_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
+
+        model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.input_conv.0.bias"] = model.residual_stack[i].kernel_predictor_input_convolution_bias;
+        model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.input_conv.0.weight"] = model.residual_stack[i].kernel_predictor_input_convolution_weight;
+        model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.kernel_conv.bias"] = model.residual_stack[i].kernel_predictor_kernel_convolution_bias;
+        model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.kernel_conv.weight"] = model.residual_stack[i].kernel_predictor_kernel_convolution_weight;
+        model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.bias_conv.bias"] = model.residual_stack[i].kernel_predictor_bias_convolution_bias;
+        model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.bias_conv.weight"] = model.residual_stack[i].kernel_predictor_bias_convolution_weight;
+        model.tensors["res_stack." + std::to_string(i) + ".convt_pre.1.weight"] = model.residual_stack[i].convolution_t_pre_weight;
+        model.tensors["res_stack." + std::to_string(i) + ".convt_pre.1.bias"] = model.residual_stack[i].convolution_t_pre_bias;
+        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.0.1.weight"] = model.residual_stack[i].conv_blocks_0_1_weight;
+        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.0.1.bias"] = model.residual_stack[i].conv_blocks_0_1_bias;
+        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.1.1.weight"] = model.residual_stack[i].conv_blocks_1_1_weight;
+        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.1.1.bias"] = model.residual_stack[i].conv_blocks_1_1_bias;
+        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.2.1.weight"] = model.residual_stack[i].conv_blocks_2_1_weight;
+        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.2.1.bias"] = model.residual_stack[i].conv_blocks_2_1_bias;
+        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.3.1.weight"] = model.residual_stack[i].conv_blocks_3_1_weight;
+        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.3.1.bias"] = model.residual_stack[i].conv_blocks_3_1_bias;
+    }
+
+    model.convolution_post_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+    model.convolution_post_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 7, 32);    
+
+    model.tensors["conv_pre.bias"] = model.convolution_pre_bias;
+    model.tensors["conv_pre.weight"] = model.convolution_pre_weight;
+    model.tensors["conv_post.1.bias"] = model.convolution_post_bias;
+    model.tensors["conv_post.1.weight"] = model.convolution_post_weight;
 
 
 
@@ -5500,10 +5588,30 @@ int main(int argc, char ** argv) {
 
     std::vector<float> mel = diffusion(trimmed_latents[0]);
 
+
+
+
     save_f32_vector("./logs/diffusion_input.bin", trimmed_latents[0]);
     std::cout << trimmed_latents[0].size() <<std::endl;
     save_f32_vector("./logs/mel.bin", mel);
     std::cout << mel.size() <<std::endl;
+
+
+
+    std::string vocoder_model_file_path = "../models/ggml-vocoder-model.bin";
+
+
+    vocoder_model vocoder;
+
+
+    // load the model
+    {
+    if (!vocoder_model_load(vocoder_model_file_path, vocoder)) {
+        fprintf(stderr, "%s: failed to load model from '%s'\n", __func__, vocoder_model_file_path.c_str());
+        exit(1);
+    }
+    }
+
 
     return 0;
   
