@@ -3767,6 +3767,65 @@ struct ggml_cgraph * diffusion_graph(
 }
 
 
+struct ggml_cgraph * vocoder_graph(
+    struct vocoder_model & model, 
+    std::vector<float> & mel_vector,
+    std::vector<float> & padding_vector
+){
+
+    static size_t buf_size = ggml_tensor_overhead()*GPT2_MAX_NODES + ggml_graph_overhead_custom(GPT2_MAX_NODES, false);
+    static std::vector<uint8_t> buf(buf_size);
+
+    struct ggml_init_params params = {
+        /*.mem_size   =*/ buf_size,
+        /*.mem_buffer =*/ buf.data(),
+        /*.no_alloc   =*/ true, // the tensors will be allocated later by ggml_gallocr_alloc_graph()
+    };
+
+
+    struct ggml_context * ctx0 = ggml_init(params);
+
+    struct ggml_cgraph  * gf = ggml_new_graph_custom(ctx0, GPT2_MAX_NODES, false);
+
+
+    struct ggml_tensor * mel = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, mel_vector.size()/100, 100,1);
+
+    ggml_set_name(mel, "mel_tensor");
+
+    struct ggml_tensor * padding = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, 10, 100,1);
+
+    ggml_set_name(padding, "padding_tensor");
+
+    struct ggml_tensor * vocoder_noise = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, mel_vector.size()/100 + 10, 64,1);
+
+    ggml_set_name(vocoder_noise, "vocoder_noise_tensor");
+
+
+    ggml_build_forward_expand(gf, mel);
+    ggml_build_forward_expand(gf, padding);
+    ggml_build_forward_expand(gf, vocoder_noise);
+
+
+    mel = ggml_cont(ctx0,ggml_permute(ctx0, mel, 2,1,0,3));
+    padding = ggml_cont(ctx0,ggml_permute(ctx0, padding, 2,1,0,3));
+
+
+    ggml_tensor * padded_mel = ggml_concat(ctx0, mel, padding);
+
+    padded_mel = ggml_cont(ctx0,ggml_permute(ctx0, padded_mel, 2,1,0,3));
+
+
+    ggml_build_forward_expand(gf, padded_mel);
+    ggml_set_name(padded_mel, "padded_mel");
+
+
+
+    ggml_free(ctx0);
+
+    return gf;
+
+}
+
 
 
 
@@ -3999,7 +4058,7 @@ void top_p_inplace(std::vector<float > & src){
 }
 
 
-std::vector<float> sample_diffusion_noise(int length)
+std::vector<float> sample_normal_noise(int length)
 {
     std::vector<float> noise(length);
     for (int i = 0; i < length; i ++)
@@ -4923,6 +4982,17 @@ std::vector<float> predict_xstart_from_eps(float sqrt_recip_alphas_cumprod, floa
     return result;
 }
 
+//thanks openchat3.6!
+void denormalize_tacotron_mel(std::vector<float>& norm_mel) {
+
+    const float TACOTRON_MEL_MAX = 2.3143386840820312;
+    const float TACOTRON_MEL_MIN = -11.512925148010254;
+
+    for (auto& mel : norm_mel) {
+        mel = ((mel + 1) / 2) * (TACOTRON_MEL_MAX - TACOTRON_MEL_MIN) + TACOTRON_MEL_MIN;
+    }
+}
+
 
 std::vector<float> q_posterior_mean(float posterior_mean_coef1, float posterior_mean_coef2, const std::vector<float>& x, const std::vector<float>& x_start) {
     if (x.size() != x_start.size()) {
@@ -4987,7 +5057,7 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents)
 
     std::cout << "reached" << std::endl;
 
-    std::vector<float> noise = sample_diffusion_noise( 100 * output_sequence_length);
+    std::vector<float> noise = sample_normal_noise( 100 * output_sequence_length);
     //save_f32_vector("./logs/diffusion_noise.bin", noise);
 
 
@@ -5321,7 +5391,7 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents)
 
         std::vector<float> model_sample;
 
-        std::vector<float> sample_noise = sample_diffusion_noise( 100 * output_sequence_length);
+        std::vector<float> sample_noise = sample_normal_noise( 100 * output_sequence_length);
         
         if (79-diffusion_index != 0){
         model_sample = sample_function(final_model_mean, model_log_variance, sample_noise );
@@ -5574,7 +5644,7 @@ int main(int argc, char ** argv) {
 
 
 
-
+    /*
     gpt_vocab vocab;
     gpt_vocab_init("../models/tokenizer.json", vocab);
     
@@ -5604,9 +5674,28 @@ int main(int argc, char ** argv) {
     save_f32_vector("./logs/mel.bin", mel);
     std::cout << mel.size() <<std::endl;
 
+    */
+
+    std::vector<float> mel = load_f32_vector("./logs/diffusion_input.bin", 187 * 100 * sizeof(float));
 
 
     std::string vocoder_model_file_path = "../models/ggml-vocoder-model.bin";
+
+
+    denormalize_tacotron_mel(mel);
+    printVector(mel, 3, "denormalized_mel");
+
+    std::vector<float> padding(1000);
+    for(int i = 0; i < 1000; i ++)
+    {
+        padding[i] =  -11.5129;
+    }
+
+
+    
+
+    std::vector<float> vocoder_noise = sample_normal_noise(((mel.size()/100) + 10) * 64);
+    save_f32_vector("./logs/vocoder-noise.bin", vocoder_noise);
 
 
     vocoder_model vocoder;
@@ -5619,6 +5708,56 @@ int main(int argc, char ** argv) {
         exit(1);
     }
     }
+
+
+
+    ggml_gallocr_t vocoder_allocr = NULL;
+
+
+    vocoder_allocr = ggml_gallocr_new(ggml_backend_get_default_buffer_type(vocoder.backend));  
+
+    struct ggml_cgraph * measure_gf = vocoder_graph( vocoder, mel, padding);
+
+    std::cout << "graph created" << std::endl;
+    // compute the required memory
+    size_t vocoder_mem_size = ggml_gallocr_get_buffer_size(vocoder_allocr, 0);
+
+    ggml_gallocr_reserve(vocoder_allocr, measure_gf);
+    size_t mem_size =  ggml_gallocr_get_buffer_size(vocoder_allocr, 0);
+    fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__, mem_size/1024.0/1024.0);
+
+    struct ggml_cgraph * vocoder_gf = vocoder_graph( vocoder, mel, padding);
+    ggml_gallocr_alloc_graph(vocoder_allocr, vocoder_gf);
+
+
+    struct ggml_tensor * mel_tensor = ggml_graph_get_tensor(vocoder_gf, "mel_tensor");      
+        
+    ggml_backend_tensor_set(mel_tensor, mel.data(), 0, mel.size()*ggml_element_size(mel_tensor));
+
+    struct ggml_tensor * padding_tensor = ggml_graph_get_tensor(vocoder_gf, "padding_tensor");      
+
+    ggml_backend_tensor_set(padding_tensor, padding.data(), 0, 1000 * ggml_element_size(padding_tensor));
+
+
+    struct ggml_tensor * noise_tensor = ggml_graph_get_tensor(vocoder_gf, "vocoder_noise_tensor");      
+
+    ggml_backend_tensor_set(noise_tensor, vocoder_noise.data(), 0, vocoder_noise.size() * ggml_element_size(padding_tensor));
+
+
+
+    std::cout << "reached computing time" << std::endl;
+    ggml_backend_graph_compute(vocoder.backend, vocoder_gf);
+
+
+    //extract_tensor_to_vector(ggml_graph_get_tensor(vocoder_gf, "output"), model_output);
+
+    print_all_tensors(vocoder_gf, false, true, "vocoder_noise_tensor");
+    print_all_tensors(vocoder_gf, true, true, "vocoder_noise_tensor");
+
+
+
+    ggml_gallocr_free(vocoder_allocr);
+    
 
 
     return 0;
