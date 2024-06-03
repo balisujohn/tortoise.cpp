@@ -1947,7 +1947,7 @@ struct ggml_cgraph * autoregressive_latent_graph(
     
     
     
-    struct ggml_tensor * output = ggml_concat(ctx0, embedding, mel_embedding);
+    struct ggml_tensor * output = ggml_concat(ctx0, embedding, mel_embedding,2);
 
 
    // output = ggml_cont(ctx0,ggml_permute(ctx0, output, 0,2,1,3));
@@ -1986,7 +1986,7 @@ struct ggml_cgraph * autoregressive_latent_graph(
 
 
 
-    output = ggml_concat(ctx0, repeated_latent, output);
+    output = ggml_concat(ctx0, repeated_latent, output,2);
 
 
 
@@ -2484,7 +2484,7 @@ struct ggml_cgraph * autoregressive_graph(
         ggml_set_name(mel_embedding, "mel_embedding");
 
 
-        struct ggml_tensor * output = ggml_concat(ctx0, reshaped_latent, reshaped_embedding);
+        struct ggml_tensor * output = ggml_concat(ctx0, reshaped_latent, reshaped_embedding,2);
 
         struct ggml_tensor * repeated_output = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 4 * (tokens.size()+1) * 1024); // todo do this more cleanly, going to rely on 1d copy for same of simplicity
         output = ggml_reshape_1d(ctx0, output, (tokens.size()+1)*1024);
@@ -2511,7 +2511,7 @@ struct ggml_cgraph * autoregressive_graph(
 
 
 
-        gpt2_input= ggml_concat(ctx0, repeated_output,mel_embedding);
+        gpt2_input= ggml_concat(ctx0, repeated_output,mel_embedding,2);
 
         gpt2_input = ggml_permute(ctx0, gpt2_input, 0,2,1,3);
 
@@ -3434,7 +3434,7 @@ struct ggml_cgraph * diffusion_graph(
 
     cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
-    cur = ggml_reshape_2d(ctx0,ggml_concat(ctx0, cur, code_embedding), output_sequence_length, 2048);
+    cur = ggml_reshape_2d(ctx0,ggml_concat(ctx0, cur, code_embedding,2), output_sequence_length, 2048);
 
     float_16_conv_1d_weight=   ggml_reshape_3d(ctx0,ggml_cpy(ctx0, model.integrating_conv_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.integrating_conv_weight->ne)),1,2048,1024);
     cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,0,1 ));
@@ -3810,7 +3810,7 @@ struct ggml_cgraph * vocoder_graph(
     padding = ggml_cont(ctx0,ggml_permute(ctx0, padding, 2,1,0,3));
 
 
-    ggml_tensor * padded_mel = ggml_concat(ctx0, mel, padding);
+    ggml_tensor * padded_mel = ggml_concat(ctx0, mel, padding,2);
 
     padded_mel = ggml_cont(ctx0,ggml_permute(ctx0, padded_mel, 2,1,0,3));
 
