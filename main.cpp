@@ -3814,9 +3814,22 @@ struct ggml_cgraph * vocoder_graph(
 
     padded_mel = ggml_cont(ctx0,ggml_permute(ctx0, padded_mel, 2,1,0,3));
 
+    ggml_tensor * cur = ggml_pad_reflect_1d(ctx0, vocoder_noise, 3,3);
+    
+    ggml_tensor * float_16_conv_1d_weight=   ggml_cpy(ctx0, model.convolution_pre_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.convolution_pre_weight->ne));
+    cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,0,1 ));
+    
 
-    ggml_build_forward_expand(gf, padded_mel);
-    ggml_set_name(padded_mel, "padded_mel");
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.convolution_pre_bias)));
+
+
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+    
+    ggml_build_forward_expand(gf, cur);
+    ggml_set_name(cur, "vocoder_output");
 
 
 
@@ -5751,8 +5764,8 @@ int main(int argc, char ** argv) {
 
     //extract_tensor_to_vector(ggml_graph_get_tensor(vocoder_gf, "output"), model_output);
 
-    print_all_tensors(vocoder_gf, false, true, "vocoder_noise_tensor");
-    print_all_tensors(vocoder_gf, true, true, "vocoder_noise_tensor");
+    print_all_tensors(vocoder_gf, false, true, "vocoder_output");
+    print_all_tensors(vocoder_gf, true, true, "vocoder_output");
 
 
 
