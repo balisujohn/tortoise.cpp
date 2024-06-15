@@ -3804,11 +3804,11 @@ struct ggml_cgraph * vocoder_graph(
     ggml_build_forward_expand(gf, vocoder_noise);
 
     
-    mel = ggml_cont(ctx0,ggml_permute(ctx0, mel, 2,1,0,3));
+    struct ggml_tensor * permuted_mel = ggml_cont(ctx0,ggml_permute(ctx0, mel, 2,1,0,3));
     padding = ggml_cont(ctx0,ggml_permute(ctx0, padding, 2,1,0,3));
 
 
-    ggml_tensor * padded_mel = ggml_concat(ctx0, mel, padding,2);
+    ggml_tensor * padded_mel = ggml_concat(ctx0, permuted_mel, padding,2);
 
     padded_mel = ggml_cont(ctx0,ggml_permute(ctx0, padded_mel, 2,1,0,3));
 
@@ -3829,6 +3829,9 @@ struct ggml_cgraph * vocoder_graph(
     int strides[] = {8,4,4};
     int paddings[] = {4,2,2};
 
+
+    struct ggml_tensor * conditioning;
+
     //graph tether
     //res blocks
     for (int i =0; i < 1; i++)
@@ -3844,10 +3847,27 @@ struct ggml_cgraph * vocoder_graph(
 
         cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.residual_stack[i].convolution_t_pre_bias)));
 
+        conditioning = ggml_cpy(ctx0, mel, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,mel->ne));
 
+
+        float_16_conv_1d_weight=   ggml_cpy(ctx0, model.residual_stack[i].kernel_predictor_input_convolution_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.residual_stack[i].kernel_predictor_input_convolution_weight->ne));
+        conditioning = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, conditioning, 1,2,1 ));
+        
+
+        conditioning = ggml_cpy(ctx0, conditioning, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,conditioning->ne));
+
+
+        conditioning = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, conditioning)), model.residual_stack[i].kernel_predictor_input_convolution_bias)));
+
+
+        conditioning = ggml_cpy(ctx0, conditioning, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,conditioning->ne));
+
+        conditioning = ggml_cont(ctx0,ggml_leaky_relu(ctx0, conditioning, 0.2, false));
+
+
+        cur = conditioning;
 
     }
-
 
 
     ggml_build_forward_expand(gf, cur);
@@ -5711,7 +5731,7 @@ int main(int argc, char ** argv) {
 
     */
 
-    std::vector<float> mel = load_f32_vector("./logs/diffusion_input.bin", 187 * 100 * sizeof(float));
+    std::vector<float> mel = load_f32_vector("./logs/mel.bin", 187 * 100 * sizeof(float));
 
 
     std::string vocoder_model_file_path = "../models/ggml-vocoder-model.bin";
