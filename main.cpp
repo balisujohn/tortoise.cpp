@@ -420,7 +420,7 @@ struct vocoder_residual_block{
 };
 
 
-
+// model tether
 struct vocoder_model{
 
 
@@ -1577,7 +1577,6 @@ bool vocoder_model_load(const std::string & fname, vocoder_model & model)
 
     buffer_size += ggml_type_sizef(GGML_TYPE_F32); // post convolution bias
     buffer_size += 32 * 7 * ggml_type_sizef(GGML_TYPE_F32); // post convolution weight
-
 
 
     printf("%s: ggml tensor size    = %d bytes\n", __func__, (int) sizeof(ggml_tensor));
@@ -3787,7 +3786,6 @@ struct ggml_cgraph * vocoder_graph(
 
     struct ggml_cgraph  * gf = ggml_new_graph_custom(ctx0, GPT2_MAX_NODES, false);
 
-
     struct ggml_tensor * mel = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, mel_vector.size()/100, 100,1);
 
     ggml_set_name(mel, "mel_tensor");
@@ -3805,7 +3803,7 @@ struct ggml_cgraph * vocoder_graph(
     ggml_build_forward_expand(gf, padding);
     ggml_build_forward_expand(gf, vocoder_noise);
 
-
+    
     mel = ggml_cont(ctx0,ggml_permute(ctx0, mel, 2,1,0,3));
     padding = ggml_cont(ctx0,ggml_permute(ctx0, padding, 2,1,0,3));
 
@@ -3828,6 +3826,30 @@ struct ggml_cgraph * vocoder_graph(
 
     cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
     
+    int strides[] = {8,4,4};
+    int paddings[] = {4,2,2};
+
+    //graph tether
+    //res blocks
+    for (int i =0; i < 1; i++)
+    {
+
+        ggml_tensor * float_32_conv_transpose_1d_weight=   ggml_cont(ctx0,ggml_cpy(ctx0, model.residual_stack[i].convolution_t_pre_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.residual_stack[i].convolution_t_pre_weight->ne)));
+
+        cur = ggml_cont(ctx0,ggml_leaky_relu(ctx0, cur, 0.2, false));
+
+        cur = ggml_cont(ctx0,ggml_conv_transpose_1d(ctx0, model.residual_stack[i].convolution_t_pre_weight, cur, strides[i],0,1 ));
+
+        cur = ggml_cont(ctx0,ggml_view_2d(ctx0, cur,  cur->ne[0]-(2*paddings[i]), 32, cur->nb[1], paddings[i] * ggml_element_size(cur)));
+
+        cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.residual_stack[i].convolution_t_pre_bias)));
+
+
+
+    }
+
+
+
     ggml_build_forward_expand(gf, cur);
     ggml_set_name(cur, "vocoder_output");
 
@@ -4369,7 +4391,7 @@ void print_all_tensors(struct ggml_cgraph * gf, bool leaves, bool filter_flag, s
         }
         else if(test->type == GGML_TYPE_F16)
         {
-            std::vector<ggml_fp16_t> test_read( elements);
+        std::vector<ggml_fp16_t> test_read( elements);
         ggml_backend_tensor_get(test,test_read.data(), 0 ,sizeof(ggml_fp16_t)* elements);
     //        
         for (int c = 0; c < elements ; c++)
@@ -5763,7 +5785,7 @@ int main(int argc, char ** argv) {
 
 
     //extract_tensor_to_vector(ggml_graph_get_tensor(vocoder_gf, "output"), model_output);
-
+    std::cout << "reached" << std::endl;
     print_all_tensors(vocoder_gf, false, true, "vocoder_output");
     print_all_tensors(vocoder_gf, true, true, "vocoder_output");
 
