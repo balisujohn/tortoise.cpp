@@ -3847,7 +3847,7 @@ struct ggml_cgraph * vocoder_graph(
 
         cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.residual_stack[i].convolution_t_pre_bias)));
 
-        conditioning = ggml_cpy(ctx0, mel, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,mel->ne));
+        conditioning = ggml_cpy(ctx0, padded_mel, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,padded_mel->ne));
 
 
         float_16_conv_1d_weight=   ggml_cpy(ctx0, model.residual_stack[i].kernel_predictor_input_convolution_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.residual_stack[i].kernel_predictor_input_convolution_weight->ne));
@@ -3863,9 +3863,77 @@ struct ggml_cgraph * vocoder_graph(
         conditioning = ggml_cpy(ctx0, conditioning, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,conditioning->ne));
 
         conditioning = ggml_cont(ctx0,ggml_leaky_relu(ctx0, conditioning, 0.2, false));
+        
+        ggml_tensor * conditioning_offset;
+
+        for (int c =0 ; c < 3; c++)
+        {
+
+            float_16_conv_1d_weight=   ggml_cpy(ctx0, model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_1_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_1_weight->ne));
+            conditioning_offset = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, conditioning, 1,1,1 ));
+            
+
+            conditioning_offset = ggml_cpy(ctx0, conditioning_offset, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,conditioning_offset->ne));
 
 
-        cur = conditioning;
+            conditioning_offset = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, conditioning_offset)), model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_1_bias)));
+
+
+            conditioning_offset = ggml_cpy(ctx0, conditioning_offset, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,conditioning_offset->ne));
+
+            
+            conditioning_offset = ggml_cont(ctx0,ggml_leaky_relu(ctx0, conditioning_offset, 0.2, false));
+
+            float_16_conv_1d_weight=   ggml_cpy(ctx0, model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_3_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_3_weight->ne));
+            
+            conditioning_offset = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, conditioning_offset, 1,1,1 ));
+            
+
+            conditioning_offset = ggml_cpy(ctx0, conditioning_offset, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,conditioning_offset->ne));
+
+
+            conditioning_offset = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, conditioning_offset)), model.residual_stack[i].kernel_predictor_residual_conv_blocks[c].residual_convs_3_bias)));
+
+
+            conditioning_offset = ggml_cpy(ctx0, conditioning_offset, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,conditioning_offset->ne));
+
+            
+            conditioning_offset = ggml_cont(ctx0,ggml_leaky_relu(ctx0, conditioning_offset, 0.2, false));
+
+            conditioning = ggml_add(ctx0, conditioning, conditioning_offset);
+
+        }
+
+        float_16_conv_1d_weight=   ggml_cpy(ctx0, model.residual_stack[i].kernel_predictor_kernel_convolution_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.residual_stack[i].kernel_predictor_kernel_convolution_weight->ne));
+            
+        struct ggml_tensor * kernels = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, conditioning, 1,1,1 ));
+        
+
+        kernels = ggml_cpy(ctx0, kernels, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,kernels->ne));
+
+
+        kernels = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, kernels)), model.residual_stack[i].kernel_predictor_kernel_convolution_bias)));
+
+
+        kernels = ggml_cpy(ctx0, kernels, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,kernels->ne));
+
+
+        float_16_conv_1d_weight=   ggml_cpy(ctx0, model.residual_stack[i].kernel_predictor_bias_convolution_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.residual_stack[i].kernel_predictor_bias_convolution_weight->ne));
+            
+        struct ggml_tensor * bias = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, conditioning, 1,1,1 ));
+        
+
+        bias = ggml_cpy(ctx0, bias, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,bias->ne));
+
+
+        bias = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, bias)), model.residual_stack[i].kernel_predictor_bias_convolution_bias)));
+
+
+        bias = ggml_cpy(ctx0, bias, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,bias->ne));
+
+
+        
+        cur = bias;
 
     }
 
