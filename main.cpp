@@ -385,6 +385,12 @@ struct residual_conv_block{
 
 };
 
+struct conv_block{
+    struct ggml_tensor * conv_block_1_bias;
+    struct ggml_tensor * conv_block_1_weight;
+
+};
+
 
 struct vocoder_residual_block{
 
@@ -404,7 +410,10 @@ struct vocoder_residual_block{
     struct ggml_tensor * convolution_t_pre_bias;
 
 
+    std::vector<conv_block> conv_blocks;
 
+
+    /*
     struct ggml_tensor * conv_blocks_0_1_bias;
     struct ggml_tensor * conv_blocks_0_1_weight;
 
@@ -415,7 +424,7 @@ struct vocoder_residual_block{
     struct ggml_tensor * conv_blocks_2_1_weight;
 
     struct ggml_tensor * conv_blocks_3_1_bias;
-    struct ggml_tensor * conv_blocks_3_1_weight;
+    struct ggml_tensor * conv_blocks_3_1_weight;*/
 
 };
 
@@ -1671,14 +1680,6 @@ bool vocoder_model_load(const std::string & fname, vocoder_model & model)
             model.residual_stack[i].convolution_t_pre_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 8, 32, 32);
         }
         model.residual_stack[i].convolution_t_pre_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
-        model.residual_stack[i].conv_blocks_0_1_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 32, 32);
-        model.residual_stack[i].conv_blocks_0_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
-        model.residual_stack[i].conv_blocks_1_1_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 32, 32);
-        model.residual_stack[i].conv_blocks_1_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
-        model.residual_stack[i].conv_blocks_2_1_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 32, 32);
-        model.residual_stack[i].conv_blocks_2_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
-        model.residual_stack[i].conv_blocks_3_1_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3,  32, 32);
-        model.residual_stack[i].conv_blocks_3_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
 
         model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.input_conv.0.bias"] = model.residual_stack[i].kernel_predictor_input_convolution_bias;
         model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.input_conv.0.weight"] = model.residual_stack[i].kernel_predictor_input_convolution_weight;
@@ -1688,14 +1689,18 @@ bool vocoder_model_load(const std::string & fname, vocoder_model & model)
         model.tensors["res_stack." + std::to_string(i) + ".kernel_predictor.bias_conv.weight"] = model.residual_stack[i].kernel_predictor_bias_convolution_weight;
         model.tensors["res_stack." + std::to_string(i) + ".convt_pre.1.weight"] = model.residual_stack[i].convolution_t_pre_weight;
         model.tensors["res_stack." + std::to_string(i) + ".convt_pre.1.bias"] = model.residual_stack[i].convolution_t_pre_bias;
-        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.0.1.weight"] = model.residual_stack[i].conv_blocks_0_1_weight;
-        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.0.1.bias"] = model.residual_stack[i].conv_blocks_0_1_bias;
-        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.1.1.weight"] = model.residual_stack[i].conv_blocks_1_1_weight;
-        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.1.1.bias"] = model.residual_stack[i].conv_blocks_1_1_bias;
-        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.2.1.weight"] = model.residual_stack[i].conv_blocks_2_1_weight;
-        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.2.1.bias"] = model.residual_stack[i].conv_blocks_2_1_bias;
-        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.3.1.weight"] = model.residual_stack[i].conv_blocks_3_1_weight;
-        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks.3.1.bias"] = model.residual_stack[i].conv_blocks_3_1_bias;
+
+        model.residual_stack[i].conv_blocks.resize(4);
+
+        for(int c = 0; c < 4; c++)
+        {
+        model.residual_stack[i].conv_blocks[c].conv_block_1_weight = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 3, 32, 32);
+        model.residual_stack[i].conv_blocks[c].conv_block_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
+
+        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks."+std::to_string(c) +".1.weight"] = model.residual_stack[i].conv_blocks[c].conv_block_1_weight;
+        model.tensors["res_stack." + std::to_string(i) + ".conv_blocks."+std::to_string(c) +".1.bias"] = model.residual_stack[i].conv_blocks[c].conv_block_1_bias;
+
+        }
     }
 
     model.convolution_post_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
@@ -3830,6 +3835,7 @@ struct ggml_cgraph * vocoder_graph(
     int paddings[] = {4,2,2};
 
 
+
     struct ggml_tensor * conditioning;
 
     //graph tether
@@ -3932,8 +3938,50 @@ struct ggml_cgraph * vocoder_graph(
         bias = ggml_cpy(ctx0, bias, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,bias->ne));
 
 
+
+
+        kernels = ggml_reshape_3d(ctx0, kernels, kernels->ne[0], 6144, 4);
+        bias = ggml_reshape_3d(ctx0, bias, bias->ne[0], 64, 4);
+
+
+        int conv_block_dilations[] = {1,3,9,27};
+        int conv_block_paddings[] = {1,3,9,27};
+
+        ggml_tensor * output;
+        ggml_tensor * k;
+        ggml_tensor * b;
         
-        cur = bias;
+        for (int c = 0; c < 1; c++)
+        {
+            output = ggml_leaky_relu(ctx0, cur, 0.2, false);
+
+            float_16_conv_1d_weight=   ggml_cpy(ctx0, model.residual_stack[i].conv_blocks[c].conv_block_1_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.residual_stack[i].conv_blocks[c].conv_block_1_weight->ne));
+            
+            output = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, output, 1,conv_block_paddings[c],conv_block_dilations[c]));
+            
+
+            output = ggml_cpy(ctx0, output, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,output->ne));
+
+
+            output = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, output)), model.residual_stack[i].conv_blocks[c].conv_block_1_bias)));
+
+
+            output = ggml_cpy(ctx0, output, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,output->ne));
+
+            output = ggml_leaky_relu(ctx0, output, 0.2, false);
+
+            k =   ggml_cont(ctx0,ggml_view_3d(ctx0, kernels, kernels->ne[0], 6144, 1, kernels->nb[1], kernels->nb[2], c * kernels->ne[0] * 6144 * sizeof(float)));
+            k =   ggml_reshape_4d(ctx0,k,kernels->ne[0],3,64,32);
+
+            b =   ggml_cont(ctx0,ggml_view_3d(ctx0, bias, bias->ne[0], 64, 1, bias->nb[1], bias->nb[2], c * bias->ne[0] * 64 * sizeof(float)));
+            b =   ggml_reshape_2d(ctx0,b,bias->ne[0],64);
+
+            output = ggml_pad(ctx0, output, 1,0,0,0);
+
+
+        }
+        
+        cur = output;
 
     }
 
