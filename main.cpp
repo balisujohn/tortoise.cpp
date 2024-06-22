@@ -3976,8 +3976,9 @@ struct ggml_cgraph * vocoder_graph(
             b =   ggml_cont(ctx0,ggml_view_3d(ctx0, bias, bias->ne[0], 64, 1, bias->nb[1], bias->nb[2], c * bias->ne[0] * 64 * sizeof(float)));
             b =   ggml_reshape_2d(ctx0,b,bias->ne[0],64);
 
-            output = ggml_pad(ctx0, output, 1,0,0,0);
+            output = ggml_pad_ext(ctx0, output, 1,1,0,0,0,0,0,0);
 
+            output = ggml_unfold_1d(ctx0, output, 10, 8);
 
         }
         
