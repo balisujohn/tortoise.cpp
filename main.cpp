@@ -3980,6 +3980,15 @@ struct ggml_cgraph * vocoder_graph(
 
             output = ggml_unfold_1d(ctx0, output, 10, 8);
 
+            output = ggml_unfold_1d(ctx0, output, 1, 1);
+
+            output = ggml_cont(ctx0,ggml_permute(ctx0, output, 1, 0, 2, 3));
+
+            output = ggml_reshape_3d(ctx0, output, 10, 1, output->ne[2] * 32);
+
+            output = ggml_unfold_1d(ctx0, output, 3,1);
+
+
         }
         
         cur = output;
