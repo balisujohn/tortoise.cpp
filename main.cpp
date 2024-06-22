@@ -3950,6 +3950,8 @@ struct ggml_cgraph * vocoder_graph(
         ggml_tensor * output;
         ggml_tensor * k;
         ggml_tensor * b;
+        ggml_tensor * reshaped_kernel;
+        ggml_tensor * output_accumulator; 
         
         for (int c = 0; c < 1; c++)
         {
@@ -3984,11 +3986,35 @@ struct ggml_cgraph * vocoder_graph(
 
             output = ggml_cont(ctx0,ggml_permute(ctx0, output, 1, 0, 2, 3));
 
-            output = ggml_reshape_3d(ctx0, output, 10, 1, output->ne[2] * 32);
+
+            const int output_length = output->ne[2];
+
+            output = ggml_reshape_3d(ctx0, output, 10, 1, output_length * 32);
 
             output = ggml_unfold_1d(ctx0, output, 3,1);
 
 
+            // o = torch.einsum('bildsk,biokl->bolsd', x, kernel)
+
+
+            output = ggml_reshape_4d(ctx0, output, 3, 8 , output_length, 32);
+
+            reshaped_kernel = ggml_reshape_4d(ctx0, k, output_length, 3, 64, 32);
+
+            reshaped_kernel = ggml_cont(ctx0, ggml_permute(ctx0, reshaped_kernel, 2,0,1,3));
+
+            output = ggml_mul_mat(ctx0, reshaped_kernel, output);
+
+            output_accumulator =  ggml_cont(ctx0,ggml_view_4d(ctx0, output, 64, 8, output_length,
+            1, output->nb[1], output->nb[2], output->nb[3], 0 * output_length * 64 * 8 * sizeof(float)  )); 
+            for (int j = 1; j < 32; j++ )
+            {
+                output_accumulator = ggml_add(ctx0, output_accumulator, ggml_cont(ctx0,ggml_view_4d(ctx0, output, 64, 8, output_length, 1, output->nb[1], output->nb[2], output->nb[3], j * output_length * 64 * 8 * sizeof(float)  )));
+            }
+
+
+            output = ggml_cont(ctx0,ggml_permute(ctx0, output_accumulator, 3,1,2,0));
+    
         }
         
         cur = output;
