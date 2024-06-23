@@ -3833,6 +3833,7 @@ struct ggml_cgraph * vocoder_graph(
     
     int strides[] = {8,4,4};
     int paddings[] = {4,2,2};
+    int hop_sizes[] = {8,64,256};
 
 
 
@@ -3853,6 +3854,8 @@ struct ggml_cgraph * vocoder_graph(
 
         cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.residual_stack[i].convolution_t_pre_bias)));
 
+       
+
         conditioning = ggml_cpy(ctx0, padded_mel, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,padded_mel->ne));
 
 
@@ -3871,6 +3874,8 @@ struct ggml_cgraph * vocoder_graph(
         conditioning = ggml_cont(ctx0,ggml_leaky_relu(ctx0, conditioning, 0.2, false));
         
         ggml_tensor * conditioning_offset;
+
+       
 
         for (int c =0 ; c < 3; c++)
         {
@@ -3939,7 +3944,6 @@ struct ggml_cgraph * vocoder_graph(
 
 
 
-
         kernels = ggml_reshape_3d(ctx0, kernels, kernels->ne[0], 6144, 4);
         bias = ggml_reshape_3d(ctx0, bias, bias->ne[0], 64, 4);
 
@@ -3951,9 +3955,12 @@ struct ggml_cgraph * vocoder_graph(
         ggml_tensor * k;
         ggml_tensor * b;
         ggml_tensor * reshaped_kernel;
-        ggml_tensor * output_accumulator; 
+        ggml_tensor * output_accumulator;
+        ggml_tensor * output_half_1;
+        ggml_tensor * output_half_2;
+
         
-        for (int c = 0; c < 1; c++)
+        for (int c = 0; c < 4; c++)
         {
             output = ggml_leaky_relu(ctx0, cur, 0.2, false);
 
@@ -4009,15 +4016,26 @@ struct ggml_cgraph * vocoder_graph(
             1, output->nb[1], output->nb[2], output->nb[3], 0 * output_length * 64 * 8 * sizeof(float)  )); 
             for (int j = 1; j < 32; j++ )
             {
-                output_accumulator = ggml_add(ctx0, output_accumulator, ggml_cont(ctx0,ggml_view_4d(ctx0, output, 64, 8, output_length, 1, output->nb[1], output->nb[2], output->nb[3], j * output_length * 64 * 8 * sizeof(float)  )));
+                output_accumulator = ggml_add(ctx0, output_accumulator, ggml_cont(ctx0,ggml_view_4d(ctx0, output, 64, 8, output_length, 
+                1, output->nb[1], output->nb[2], output->nb[3], j * output_length * 64 * 8 * sizeof(float)  )));
             }
 
 
             output = ggml_cont(ctx0,ggml_permute(ctx0, output_accumulator, 3,1,2,0));
+
+            output = ggml_add(ctx0, output, ggml_reshape_4d(ctx0, b, 1,1, output_length, 64));
     
+            output = ggml_reshape_3d(ctx0, output,1, 8*output_length, 64);
+
+
+            output_half_1 =   ggml_sigmoid(ctx0,ggml_cont(ctx0,ggml_view_3d(ctx0, output, 1, 8*output_length,32, output->nb[1], output->nb[2], 0 * 1 * 8 * output_length * 32 * sizeof(float)  ))); 
+            output_half_2 =   ggml_tanh(ctx0,ggml_cont(ctx0,ggml_view_3d(ctx0, output, 1, 8*output_length,32, output->nb[1], output->nb[2], 1 * 1 * 8 * output_length * 32 * sizeof(float)  ))); 
+
+            cur = ggml_add(ctx0, cur, ggml_reshape_4d(ctx0,ggml_mul(ctx0,output_half_1, output_half_2), output_length * 8, 32,1,1));
+
+
         }
         
-        cur = output;
 
     }
 
