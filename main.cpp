@@ -48,45 +48,6 @@ void localAssert(bool condition)
     }
 }
 
-/*
- 
- ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ ██████╗  █████╗ ██████╗  █████╗ ███╗   ███╗███████╗████████╗███████╗██████╗     
- ██║  ██║╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗████╗ ████║██╔════╝╚══██╔══╝██╔════╝██╔══██╗    
- ███████║ ╚████╔╝ ██████╔╝█████╗  ██████╔╝██████╔╝███████║██████╔╝███████║██╔████╔██║█████╗     ██║   █████╗  ██████╔╝    
- ██╔══██║  ╚██╔╝  ██╔═══╝ ██╔══╝  ██╔══██╗██╔═══╝ ██╔══██║██╔══██╗██╔══██║██║╚██╔╝██║██╔══╝     ██║   ██╔══╝  ██╔══██╗    
- ██║  ██║   ██║   ██║     ███████╗██║  ██║██║     ██║  ██║██║  ██║██║  ██║██║ ╚═╝ ██║███████╗   ██║   ███████╗██║  ██║    
- ╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝    
-                                                                                                                          
- ███╗   ███╗ █████╗ ███╗   ██╗██╗███████╗███████╗███████╗████████╗                                                        
- ████╗ ████║██╔══██╗████╗  ██║██║██╔════╝██╔════╝██╔════╝╚══██╔══╝                                                        
- ██╔████╔██║███████║██╔██╗ ██║██║█████╗  █████╗  ███████╗   ██║                                                           
- ██║╚██╔╝██║██╔══██║██║╚██╗██║██║██╔══╝  ██╔══╝  ╚════██║   ██║                                                           
- ██║ ╚═╝ ██║██║  ██║██║ ╚████║██║██║     ███████╗███████║   ██║                                                           
- ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝╚═╝     ╚══════╝╚══════╝   ╚═╝                                                           
-                                                                                                                          
- 
-*/
-
-struct autoregressive_hparams{
-    int32_t max_mel_tokens;
-    int32_t max_text_tokens;
-    int32_t max_conditioning_inputs;
-    int32_t layers;
-    int32_t model_dim;
-    int32_t heads;
-    int32_t number_text_tokens;
-    int32_t start_text_token;
-    int32_t num_embeddings;
-};
-
-
-struct diffusion_hparams{
-    int32_t num_heads;
-    int32_t out_channels;
-};
-
-//these are almost entirely static and unused, I'm not certain they will be necessary at all, they were included because I wasn't sure if they would be necessary.
-// TODO consider which ones should be retained, if any. 
 
 
 /*
@@ -118,12 +79,11 @@ struct diffusion_hparams{
 
 //derived from ggml gpt2 reference implementation
 struct gpt2_layer {
-    // layer norm 1 and 2, accidentally named incorrectly
-    struct ggml_tensor * linear_1_weights;
-    struct ggml_tensor * linear_1_bias;
+    struct ggml_tensor * layer_norm_1_weights;
+    struct ggml_tensor * layer_norm_1_bias;
 
-    struct ggml_tensor * linear_2_weights;
-    struct ggml_tensor * linear_2_bias;
+    struct ggml_tensor * layer_norm_2_weights;
+    struct ggml_tensor * layer_norm_2_bias;
 
     // attention
     struct ggml_tensor * c_attention_attention_weights;
@@ -145,7 +105,6 @@ struct gpt2_layer {
 
 
 struct autoregressive_model{
-    autoregressive_hparams hparams;
 
     struct ggml_tensor * embedding;
 
@@ -294,8 +253,6 @@ struct diffusion_layer{
 
 struct diffusion_model{
 
-    diffusion_hparams hparams;
-
 
     struct ggml_tensor * diffusion_conditioning_latent;
 
@@ -316,7 +273,7 @@ struct diffusion_model{
 
     struct ggml_tensor * time_emb_linear_1_weight;
 
-    struct ggml_tensor * time_emb_linear_1_bias;
+    struct ggml_tensor * time_emb_layer_norm_1_bias;
 
     std::vector<diffusion_layer> timestep_conditioning_integrator_diffusion_layers;
 
@@ -587,6 +544,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
     }
 
     // load hparams
+    /*
     {
         auto & hparams = model.hparams;
 
@@ -623,6 +581,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
     
     }    
+    */
 
     size_t buffer_size = 0;
 
@@ -726,7 +685,7 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         }
 
 
-        model.buffer_w = ggml_backend_alloc_buffer(model.backend, buffer_size);
+        //model.buffer_w = ggml_backend_alloc_buffer(model.backend, buffer_size);
 
 
         auto & ctx = model.ctx;
@@ -749,8 +708,8 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         {
             auto & layer = model.layers[i];
 
-            layer.linear_1_weights = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
-            layer.linear_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.layer_norm_1_weights = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.layer_norm_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
 
             layer.c_attention_attention_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32,3072, 1024);
             layer.c_attention_attention_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 3072);
@@ -758,8 +717,8 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
             layer.c_attention_projection_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32,1024, 1024);
             layer.c_attention_projection_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
 
-            layer.linear_2_weights = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
-            layer.linear_2_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.layer_norm_2_weights = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+            layer.layer_norm_2_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
 
             layer.c_multi_layer_perceptron_fully_connected_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32,4096, 1024);
             layer.c_multi_layer_perceptron_fully_connected_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 4096);
@@ -769,8 +728,8 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
             layer.c_multi_layer_perceptron_projection_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
 
 
-            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_1.weight"] = layer.linear_1_weights;
-            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_1.bias"] = layer.linear_1_bias;
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_1.weight"] = layer.layer_norm_1_weights;
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_1.bias"] = layer.layer_norm_1_bias;
 
             model.tensors["inference_model.transformer.h."+std::to_string(i)+".attn.c_attn.weight"] = layer.c_attention_attention_weights;
             model.tensors["inference_model.transformer.h."+std::to_string(i)+".attn.c_attn.bias"] = layer.c_attention_attention_bias;
@@ -778,8 +737,8 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
             model.tensors["inference_model.transformer.h."+std::to_string(i)+".attn.c_proj.weight"] = layer.c_attention_projection_weights;
             model.tensors["inference_model.transformer.h."+std::to_string(i)+".attn.c_proj.bias"] = layer.c_attention_projection_bias;
 
-            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_2.weight"] = layer.linear_2_weights;
-            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_2.bias"] = layer.linear_2_bias;
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_2.weight"] = layer.layer_norm_2_weights;
+            model.tensors["inference_model.transformer.h."+std::to_string(i)+".ln_2.bias"] = layer.layer_norm_2_bias;
 
             model.tensors["inference_model.transformer.h."+std::to_string(i)+".mlp.c_fc.weight"] = layer.c_multi_layer_perceptron_fully_connected_weights;
             model.tensors["inference_model.transformer.h."+std::to_string(i)+".mlp.c_fc.bias"] = layer.c_multi_layer_perceptron_fully_connected_bias;
@@ -959,6 +918,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
     }
 
     // load hparams
+    /*
     {
         auto & hparams = model.hparams;
 
@@ -975,7 +935,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
 
     
     }    
-
+    */
     size_t buffer_size = 0;
 
     buffer_size += 1 * 2048 * ggml_type_sizef(GGML_TYPE_F32); // conditioning latent
@@ -1179,7 +1139,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
         }
 
 
-        model.buffer_w = ggml_backend_alloc_buffer(model.backend, buffer_size);
+        //model.buffer_w = ggml_backend_alloc_buffer(model.backend, buffer_size);
 
 
         auto & ctx = model.ctx;
@@ -1223,7 +1183,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
         model.time_emb_linear_0_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
 
         model.time_emb_linear_1_weight = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,1024);
-        model.time_emb_linear_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
+        model.time_emb_layer_norm_1_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
 
 
         model.timestep_conditioning_integrator_diffusion_layers.resize(3);
@@ -1384,7 +1344,7 @@ bool diffusion_model_load(const std::string & fname, diffusion_model & model)
         model.tensors["time_embed.0.bias"] = model.time_emb_linear_0_bias;
 
         model.tensors["time_embed.2.weight"] = model.time_emb_linear_1_weight;
-        model.tensors["time_embed.2.bias"] = model.time_emb_linear_1_bias;
+        model.tensors["time_embed.2.bias"] = model.time_emb_layer_norm_1_bias;
 
 
         model.tensors["inp_block.weight"] = model.inp_block_weight;
@@ -1640,7 +1600,7 @@ bool vocoder_model_load(const std::string & fname, vocoder_model & model)
         }
 
 
-        model.buffer_w = ggml_backend_alloc_buffer(model.backend, buffer_size);
+        //model.buffer_w = ggml_backend_alloc_buffer(model.backend, buffer_size);
 
 
     auto & ctx = model.ctx;
@@ -2066,7 +2026,7 @@ struct ggml_cgraph * autoregressive_latent_graph(
 
            ggml_format_name(cur, "l%d.norm", i);
 
-           ggml_tensor * temp_ln_1_weights = ggml_repeat(ctx0,model.layers[i].linear_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+           ggml_tensor * temp_ln_1_weights = ggml_repeat(ctx0,model.layers[i].layer_norm_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
            ggml_set_name(temp_ln_1_weights, "weights");
            //ggml_build_forward_expand(gf, temp_ln_1_weights);
@@ -2075,14 +2035,14 @@ struct ggml_cgraph * autoregressive_latent_graph(
            cur = ggml_mul(ctx0, cur,temp_ln_1_weights); // if you flip the order of this it doesn't work on the second token generation process.TODO why does flipping the order of this break it?
             
            
-           cur = ggml_add(ctx0,cur, model.layers[i].linear_1_bias);
+           cur = ggml_add(ctx0,cur, model.layers[i].layer_norm_1_bias);
            
           
           
 
 
-            //ggml_tensor * temp_weights = ggml_cpy(ctx0, model.layers[i].linear_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].linear_1_weights->ne) );
-            ggml_tensor * temp_bias = ggml_cpy(ctx0, model.layers[i].linear_1_bias, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].linear_1_bias->ne) );
+            //ggml_tensor * temp_weights = ggml_cpy(ctx0, model.layers[i].layer_norm_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].layer_norm_1_weights->ne) );
+            ggml_tensor * temp_bias = ggml_cpy(ctx0, model.layers[i].layer_norm_1_bias, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].layer_norm_1_bias->ne) );
  
           //  if(!fake_inputs)
            // {
@@ -2267,7 +2227,7 @@ struct ggml_cgraph * autoregressive_latent_graph(
 
             ggml_format_name(cur, "l%d.norm_2", i);
 
-            ggml_tensor * temp_ln_2_weights = ggml_repeat(ctx0,model.layers[i].linear_2_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+            ggml_tensor * temp_ln_2_weights = ggml_repeat(ctx0,model.layers[i].layer_norm_2_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
             ggml_set_name(temp_ln_2_weights, "test");
 
@@ -2275,7 +2235,7 @@ struct ggml_cgraph * autoregressive_latent_graph(
             ggml_build_forward_expand(gf,temp_ln_2_weights);
 
             cur = ggml_mul(ctx0, cur, temp_ln_2_weights);
-            cur = ggml_add(ctx0,cur, model.layers[i].linear_2_bias);
+            cur = ggml_add(ctx0,cur, model.layers[i].layer_norm_2_bias);
 
 
 
@@ -2624,7 +2584,7 @@ struct ggml_cgraph * autoregressive_graph(
 
            ggml_format_name(cur, "l%d.norm", i);
 
-           ggml_tensor * temp_ln_1_weights = ggml_repeat(ctx0,model.layers[i].linear_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+           ggml_tensor * temp_ln_1_weights = ggml_repeat(ctx0,model.layers[i].layer_norm_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
            ggml_set_name(temp_ln_1_weights, "weights");
            //ggml_build_forward_expand(gf, temp_ln_1_weights);
@@ -2633,13 +2593,13 @@ struct ggml_cgraph * autoregressive_graph(
            cur = ggml_mul(ctx0, cur,temp_ln_1_weights); // if you flip the order of this it doesn't work on the second token generation process.TODO why does flipping the order of this break it?
             
            
-           cur = ggml_add(ctx0,cur, model.layers[i].linear_1_bias);
+           cur = ggml_add(ctx0,cur, model.layers[i].layer_norm_1_bias);
            
           
 
 
-            //ggml_tensor * temp_weights = ggml_cpy(ctx0, model.layers[i].linear_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].linear_1_weights->ne) );
-            ggml_tensor * temp_bias = ggml_cpy(ctx0, model.layers[i].linear_1_bias, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].linear_1_bias->ne) );
+            //ggml_tensor * temp_weights = ggml_cpy(ctx0, model.layers[i].layer_norm_1_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].layer_norm_1_weights->ne) );
+            ggml_tensor * temp_bias = ggml_cpy(ctx0, model.layers[i].layer_norm_1_bias, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.layers[i].layer_norm_1_bias->ne) );
  
           //  if(!fake_inputs)
            // {
@@ -2806,7 +2766,7 @@ struct ggml_cgraph * autoregressive_graph(
 
             ggml_format_name(cur, "l%d.norm_2", i);
 
-            ggml_tensor * temp_ln_2_weights = ggml_repeat(ctx0,model.layers[i].linear_2_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+            ggml_tensor * temp_ln_2_weights = ggml_repeat(ctx0,model.layers[i].layer_norm_2_weights, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
 
             ggml_set_name(temp_ln_2_weights, "test");
 
@@ -2814,7 +2774,7 @@ struct ggml_cgraph * autoregressive_graph(
             ggml_build_forward_expand(gf,temp_ln_2_weights);
 
             cur = ggml_mul(ctx0, cur, temp_ln_2_weights);
-            cur = ggml_add(ctx0,cur, model.layers[i].linear_2_bias);
+            cur = ggml_add(ctx0,cur, model.layers[i].layer_norm_2_bias);
 
 
 
@@ -3219,7 +3179,7 @@ struct ggml_cgraph * diffusion_graph(
 
 
     emb = ggml_add(ctx0,emb,
-                model.time_emb_linear_1_bias);
+                model.time_emb_layer_norm_1_bias);
 
 
 
@@ -4939,6 +4899,7 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
         //ggml_allocr_reset(allocr);
         //allocr = ggml_allocr_new_from_buffer(buf_compute);
         gf = autoregressive_graph(model,mel_transformer_inputs_vector, tokens, false, tokens.size() + 2 + i, i+2);
+
         ggml_gallocr_alloc_graph(allocr, gf);
         std::cout << "reached computing time" << std::endl;
 
@@ -5993,6 +5954,7 @@ int main(int argc, char ** argv) {
     //std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
     std::string message = "tortoise, full process complete.";
 
+
     replaceAll(message, " " ,"[SPACE]");
 
 
@@ -6019,6 +5981,9 @@ int main(int argc, char ** argv) {
     std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
     std::vector<std::vector<int>> sequences = autoregressive_result.second;
 
+    
+    //while(true);
+
 
     std::vector<float> mel = diffusion(trimmed_latents[0]);
 
@@ -6030,7 +5995,7 @@ int main(int argc, char ** argv) {
     save_f32_vector("./logs/mel.bin", mel);
     std::cout << mel.size() <<std::endl;
 
-    
+
 
     //std::vector<float> mel = load_f32_vector("./logs/mel.bin", 187 * 100 * sizeof(float));
 
@@ -6047,7 +6012,7 @@ int main(int argc, char ** argv) {
         padding[i] =  -11.5129;
     }
 
-
+    //while(true);
     
 
     std::vector<float> vocoder_noise = sample_normal_noise(((mel.size()/100) + 10) * 64);
