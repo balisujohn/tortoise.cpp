@@ -3831,18 +3831,24 @@ struct ggml_cgraph * vocoder_graph(
 
     cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
     
-    int strides[] = {8,4,4};
-    int paddings[] = {4,2,2};
+    int strides[] = {8,8,4};
+    int paddings[] = {4,4,2};
     int hop_sizes[] = {8,64,256};
-
+    //const int kernel_size = 3;
+    //const int dilation = 1;
+    const int padding_length = 1;
 
 
     struct ggml_tensor * conditioning;
 
     //graph tether
     //res blocks
-    for (int i =0; i < 1; i++)
+    for (int i =0; i < 3; i++)
     {
+
+
+        
+
 
         ggml_tensor * float_32_conv_transpose_1d_weight=   ggml_cont(ctx0,ggml_cpy(ctx0, model.residual_stack[i].convolution_t_pre_weight, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,model.residual_stack[i].convolution_t_pre_weight->ne)));
 
@@ -3854,7 +3860,7 @@ struct ggml_cgraph * vocoder_graph(
 
         cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.residual_stack[i].convolution_t_pre_bias)));
 
-       
+
 
         conditioning = ggml_cpy(ctx0, padded_mel, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,padded_mel->ne));
 
@@ -3962,8 +3968,10 @@ struct ggml_cgraph * vocoder_graph(
         
         for (int c = 0; c < 4; c++)
         {
+
             output = ggml_leaky_relu(ctx0, cur, 0.2, false);
 
+      
             float_16_conv_1d_weight=   ggml_cpy(ctx0, model.residual_stack[i].conv_blocks[c].conv_block_1_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.residual_stack[i].conv_blocks[c].conv_block_1_weight->ne));
             
             output = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, output, 1,conv_block_paddings[c],conv_block_dilations[c]));
@@ -3971,12 +3979,15 @@ struct ggml_cgraph * vocoder_graph(
 
             output = ggml_cpy(ctx0, output, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,output->ne));
 
+           
 
             output = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, output)), model.residual_stack[i].conv_blocks[c].conv_block_1_bias)));
 
 
             output = ggml_cpy(ctx0, output, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,output->ne));
 
+
+          
             output = ggml_leaky_relu(ctx0, output, 0.2, false);
 
             k =   ggml_cont(ctx0,ggml_view_3d(ctx0, kernels, kernels->ne[0], 6144, 1, kernels->nb[1], kernels->nb[2], c * kernels->ne[0] * 6144 * sizeof(float)));
@@ -3987,7 +3998,13 @@ struct ggml_cgraph * vocoder_graph(
 
             output = ggml_pad_ext(ctx0, output, 1,1,0,0,0,0,0,0);
 
-            output = ggml_unfold_1d(ctx0, output, 10, 8);
+            std::cout << "output shape" << std::endl;
+            std::cout << output->ne[0] << "," << output->ne[1] << "," <<  output->ne[2] << "," <<  output->ne[3] << std::endl;
+            std::cout << hop_sizes[i] + 2 * padding_length << "," << hop_sizes[i] << std::endl;
+
+            output = ggml_unfold_1d(ctx0, output, hop_sizes[i] + 2 * padding_length, hop_sizes[i]);
+
+         
 
             output = ggml_unfold_1d(ctx0, output, 1, 1);
 
@@ -3996,48 +4013,84 @@ struct ggml_cgraph * vocoder_graph(
 
             const int output_length = output->ne[2];
 
-            output = ggml_reshape_3d(ctx0, output, 10, 1, output_length * 32);
+          
+
+            output = ggml_reshape_3d(ctx0, output, hop_sizes[i] + 2 * padding_length, 1, output_length * 32);
 
             output = ggml_unfold_1d(ctx0, output, 3,1);
+
+            
+
 
 
             // o = torch.einsum('bildsk,biokl->bolsd', x, kernel)
 
 
-            output = ggml_reshape_4d(ctx0, output, 3, 8 , output_length, 32);
+            output = ggml_reshape_4d(ctx0, output, 3, hop_sizes[i] , output_length, 32);
 
             reshaped_kernel = ggml_reshape_4d(ctx0, k, output_length, 3, 64, 32);
 
             reshaped_kernel = ggml_cont(ctx0, ggml_permute(ctx0, reshaped_kernel, 2,0,1,3));
 
+
+        
+
             output = ggml_mul_mat(ctx0, reshaped_kernel, output);
 
-            output_accumulator =  ggml_cont(ctx0,ggml_view_4d(ctx0, output, 64, 8, output_length,
-            1, output->nb[1], output->nb[2], output->nb[3], 0 * output_length * 64 * 8 * sizeof(float)  )); 
+
+           
+
+            output_accumulator =  ggml_cont(ctx0,ggml_view_4d(ctx0, output, 64, hop_sizes[i], output_length,
+            1, output->nb[1], output->nb[2], output->nb[3], 0 * output_length * 64 * hop_sizes[i] * sizeof(float)  )); 
             for (int j = 1; j < 32; j++ )
             {
-                output_accumulator = ggml_add(ctx0, output_accumulator, ggml_cont(ctx0,ggml_view_4d(ctx0, output, 64, 8, output_length, 
-                1, output->nb[1], output->nb[2], output->nb[3], j * output_length * 64 * 8 * sizeof(float)  )));
+                output_accumulator = ggml_add(ctx0, output_accumulator, ggml_cont(ctx0,ggml_view_4d(ctx0, output, 64, hop_sizes[i], output_length, 
+                1, output->nb[1], output->nb[2], output->nb[3], j * output_length * 64 * hop_sizes[i] * sizeof(float)  )));
             }
+
+          
 
 
             output = ggml_cont(ctx0,ggml_permute(ctx0, output_accumulator, 3,1,2,0));
 
+           
+
             output = ggml_add(ctx0, output, ggml_reshape_4d(ctx0, b, 1,1, output_length, 64));
     
-            output = ggml_reshape_3d(ctx0, output,1, 8*output_length, 64);
+            output = ggml_reshape_3d(ctx0, output,1, hop_sizes[i]*output_length, 64);
 
+            /*
+            if (i >= 1)
+            {
+               cur = output;
+                goto end;
+            }*/
 
-            output_half_1 =   ggml_sigmoid(ctx0,ggml_cont(ctx0,ggml_view_3d(ctx0, output, 1, 8*output_length,32, output->nb[1], output->nb[2], 0 * 1 * 8 * output_length * 32 * sizeof(float)  ))); 
-            output_half_2 =   ggml_tanh(ctx0,ggml_cont(ctx0,ggml_view_3d(ctx0, output, 1, 8*output_length,32, output->nb[1], output->nb[2], 1 * 1 * 8 * output_length * 32 * sizeof(float)  ))); 
+            output_half_1 =   ggml_sigmoid(ctx0,ggml_cont(ctx0,ggml_view_3d(ctx0, output, 1, hop_sizes[i]*output_length,32, output->nb[1], output->nb[2], 0 * 1 * hop_sizes[i] * output_length * 32 * sizeof(float)  ))); 
+            output_half_2 =   ggml_tanh(ctx0,ggml_cont(ctx0,ggml_view_3d(ctx0, output, 1, hop_sizes[i]*output_length,32, output->nb[1], output->nb[2], 1 * 1 * hop_sizes[i] * output_length * 32 * sizeof(float)  ))); 
 
-            cur = ggml_add(ctx0, cur, ggml_reshape_4d(ctx0,ggml_mul(ctx0,output_half_1, output_half_2), output_length * 8, 32,1,1));
+            cur = ggml_add(ctx0, cur, ggml_reshape_4d(ctx0,ggml_mul(ctx0,output_half_1, output_half_2), output_length * hop_sizes[i], 32,1,1));
 
 
         }
         
 
     }
+
+    cur = ggml_leaky_relu(ctx0, cur, 0.2, false);
+
+    float_16_conv_1d_weight=   ggml_cpy(ctx0, model.convolution_post_weight, ggml_new_tensor(ctx0, GGML_TYPE_F16,4,model.convolution_post_weight->ne));
+    cur = ggml_cont(ctx0,ggml_conv_1d(ctx0, float_16_conv_1d_weight, cur, 1,0,1 ));
+    
+
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
+
+    cur = ggml_cont(ctx0,ggml_transpose(ctx0,ggml_add(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, cur)), model.convolution_post_bias)));
+
+
+    cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32,4,cur->ne));
+
 
 
     ggml_build_forward_expand(gf, cur);
@@ -4439,6 +4492,54 @@ std::vector<int> process_logits_and_sample(ggml_cgraph * gf, std::vector<int>  &
 }
 
 
+// thanks gpt3.5
+// Function to write a WAV file from floating-point data
+void writeWav(const char* filename, const std::vector<float>& data, int sampleRate) {
+    // WAV file parameters
+    int numChannels = 1;  // Mono
+    int bitsPerSample = 32;  // Float (32-bit)
+    int byteRate = sampleRate * numChannels * bitsPerSample / 8;
+    int blockAlign = numChannels * bitsPerSample / 8;
+
+    // Open the output file
+    std::ofstream outFile(filename, std::ios::binary);
+    if (!outFile.is_open()) {
+        std::cerr << "Error opening output file." << std::endl;
+        return;
+    }
+
+    // Write the WAV header
+    // RIFF header
+    outFile.write("RIFF", 4);
+    int fileSize = 36 + data.size() * sizeof(float);  // Size of the entire file minus 8 bytes
+    outFile.write(reinterpret_cast<const char*>(&fileSize), 4);
+    outFile.write("WAVE", 4);
+
+    // Format subchunk
+    outFile.write("fmt ", 4);
+    int fmtSize = 16;
+    outFile.write(reinterpret_cast<const char*>(&fmtSize), 4);
+    int audioFormat = 3;  // Floating point PCM
+    outFile.write(reinterpret_cast<const char*>(&audioFormat), 2);
+    outFile.write(reinterpret_cast<const char*>(&numChannels), 2);
+    outFile.write(reinterpret_cast<const char*>(&sampleRate), 4);
+    outFile.write(reinterpret_cast<const char*>(&byteRate), 4);
+    outFile.write(reinterpret_cast<const char*>(&blockAlign), 2);
+    outFile.write(reinterpret_cast<const char*>(&bitsPerSample), 2);
+
+    // Data subchunk
+    outFile.write("data", 4);
+    int dataSize = data.size() * sizeof(float);
+    outFile.write(reinterpret_cast<const char*>(&dataSize), 4);
+
+    // Write the audio data
+    outFile.write(reinterpret_cast<const char*>(data.data()), dataSize);
+
+    // Close the file
+    outFile.close();
+
+    std::cout << "WAV file saved successfully." << std::endl;
+}
 
 
 
@@ -5869,7 +5970,7 @@ int main(int argc, char ** argv) {
 
 
 
-    /*
+    
     gpt_vocab vocab;
     gpt_vocab_init("../models/tokenizer.json", vocab);
     
@@ -5879,7 +5980,8 @@ int main(int argc, char ** argv) {
     //exit(0);
 
 
-    
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
+
     std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
 
 
@@ -5899,9 +6001,9 @@ int main(int argc, char ** argv) {
     save_f32_vector("./logs/mel.bin", mel);
     std::cout << mel.size() <<std::endl;
 
-    */
+    
 
-    std::vector<float> mel = load_f32_vector("./logs/mel.bin", 187 * 100 * sizeof(float));
+    //std::vector<float> mel = load_f32_vector("./logs/mel.bin", 187 * 100 * sizeof(float));
 
 
     std::string vocoder_model_file_path = "../models/ggml-vocoder-model.bin";
@@ -5978,6 +6080,13 @@ int main(int argc, char ** argv) {
     std::cout << "reached" << std::endl;
     print_all_tensors(vocoder_gf, false, true, "vocoder_output");
     print_all_tensors(vocoder_gf, true, true, "vocoder_output");
+
+    std::vector<float> audio = std::vector<float>();
+
+    extract_tensor_to_vector(  vocoder_gf->nodes[vocoder_gf->n_nodes -1] , audio);
+
+
+    writeWav("based?.wav", audio , 24000);
 
 
 
