@@ -110,9 +110,6 @@ struct autoregressive_model{
 
     std::map<std::string, struct ggml_tensor *> tensors;
 
- 
-    struct ggml_tensor * conditioning_latent;
-
     struct ggml_tensor * text_embedding_weights;
     struct ggml_tensor * text_position_embedding_weights;
 
@@ -692,7 +689,6 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
 
         model.text_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024, 256);
         model.text_position_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,404);
-        model.conditioning_latent = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,1);
         model.mel_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,8194);
         model.mel_position_embedding_weights = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1024,608);
         model.final_layer_norm_weights = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1024);
@@ -769,7 +765,6 @@ bool autoregressive_model_load(const std::string & fname, autoregressive_model &
         model.tensors["inference_model.transformer.ln_f.bias"] = model.final_layer_norm_bias;
         model.tensors["text_embedding.weight"] = model.text_embedding_weights;
         model.tensors["text_pos_embedding.emb.weight"] = model.text_position_embedding_weights;
-        model.tensors["conditioning_latent"] = model.conditioning_latent;
         model.tensors["mel_embedding.weight"] = model.mel_embedding_weights;
         model.tensors["mel_pos_embedding.emb.weight"] = model.mel_position_embedding_weights;    
 
@@ -1808,6 +1803,12 @@ struct ggml_cgraph * autoregressive_latent_graph(
 
     ggml_set_name(input, "input_tokens");
 
+
+    struct ggml_tensor * conditioning_latent = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 1024);
+
+    ggml_set_name(conditioning_latent, "auto_conditioning");
+
+
     ggml_build_forward_expand(gf, input);
 
 
@@ -1920,7 +1921,7 @@ struct ggml_cgraph * autoregressive_latent_graph(
 
    
 
-    struct ggml_tensor * reshaped_latent = ggml_reshape_1d(ctx0, model.conditioning_latent, 1024);
+    struct ggml_tensor * reshaped_latent = ggml_reshape_1d(ctx0, conditioning_latent, 1024);
 
 
     struct ggml_tensor * repeated_latent = ggml_new_tensor_1d(ctx0,GGML_TYPE_F32, 4 * 1024);
@@ -2396,6 +2397,10 @@ struct ggml_cgraph * autoregressive_graph(
 
     ggml_set_name(position, "input_position");
 
+    struct ggml_tensor * conditioning_latent = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 1024);
+
+    ggml_set_name(conditioning_latent, "auto_conditioning");
+
     ggml_tensor * gpt2_input;
 
     std::cout << "tokens size" << std::endl;
@@ -2409,7 +2414,7 @@ struct ggml_cgraph * autoregressive_graph(
         struct ggml_tensor * text_position_embedding = ggml_get_rows(ctx0, model.text_position_embedding_weights,position);
 
 
-        struct ggml_tensor * reshaped_latent = ggml_reshape_4d(ctx0, model.conditioning_latent, 1024,1,1,1);
+        struct ggml_tensor * reshaped_latent = ggml_reshape_4d(ctx0, conditioning_latent, 1024,1,1,1);
 
         struct ggml_tensor * embedding = ggml_add(ctx0,text_embedding, text_position_embedding);
 
@@ -4684,6 +4689,25 @@ void print_all_tensors(struct ggml_cgraph * gf, bool leaves, bool filter_flag, s
 }
 
 
+//thanks gpt3.5!
+std::vector<float> load_f32_vector(const std::string& filename, size_t nBytes) {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Unable to open file " << filename << std::endl;
+        return {};
+    }
+
+    // Calculate number of floats to read based on number of bytes
+    size_t numFloats = nBytes / sizeof(float);
+    std::vector<float> floats(numFloats);
+
+    // Read floats from file
+    file.read(reinterpret_cast<char*>(floats.data()), nBytes);
+
+    file.close();
+
+    return floats;
+}
 
 
 std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autoregressive(std::vector<gpt_vocab::id> tokens)
@@ -4841,6 +4865,17 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
         
     int32_t v = 0;
     ggml_backend_tensor_set(input_mel_position_tensor, &v, 0, sizeof(v));
+
+
+    struct ggml_tensor *auto_conditioning_tensor = ggml_graph_get_tensor(gf, "auto_conditioning");
+
+
+    std::vector<float> auto_conditioning_vector = load_f32_vector("../models/mol.bin", 4096);
+
+    ggml_backend_tensor_set(auto_conditioning_tensor, auto_conditioning_vector.data(), 0, 1024*ggml_element_size(auto_conditioning_tensor));
+
+
+
     
     std::cout << "entering compute time" << std::endl;
     ggml_backend_graph_compute(model.backend, gf);
@@ -4917,8 +4952,6 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
             
         int v = i+2;
         ggml_backend_tensor_set(input_fixed_embedding_ids_tensor, &v, 0, sizeof(v));
-
-
 
         ggml_backend_graph_compute(model.backend, gf);
         i+= 1;
@@ -5029,6 +5062,11 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
         }
     
     }
+
+    auto_conditioning_tensor = ggml_graph_get_tensor(latent_gf, "auto_conditioning");
+
+    ggml_backend_tensor_set(auto_conditioning_tensor, auto_conditioning_vector.data(), 0, 1024*ggml_element_size(auto_conditioning_tensor));
+
 
     ggml_backend_graph_compute(model.backend, latent_gf);
 
@@ -5734,25 +5772,6 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents)
  
 */
 
-//thanks gpt3.5!
-std::vector<float> load_f32_vector(const std::string& filename, size_t nBytes) {
-    std::ifstream file(filename, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Error: Unable to open file " << filename << std::endl;
-        return {};
-    }
-
-    // Calculate number of floats to read based on number of bytes
-    size_t numFloats = nBytes / sizeof(float);
-    std::vector<float> floats(numFloats);
-
-    // Read floats from file
-    file.read(reinterpret_cast<char*>(floats.data()), nBytes);
-
-    file.close();
-
-    return floats;
-}
 
 //thanks gpt3.5 !
 void save_f32_vectors(const std::string& filename, const std::vector<std::vector<float>>& vectors) {
@@ -5952,7 +5971,8 @@ int main(int argc, char ** argv) {
 
 
     //std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
-    std::string message = "tortoise, full process complete.";
+    //std::string message = "tortoise, full process complete.";
+    std::string message = "minimum viable product incoming.";
 
 
     replaceAll(message, " " ,"[SPACE]");
