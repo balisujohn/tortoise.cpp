@@ -4491,6 +4491,14 @@ std::vector<int> process_logits_and_sample(ggml_cgraph * gf, std::vector<int>  &
         return samples;
 }
 
+//thanks gpt3.5
+void replaceAll(std::string& str, const std::string& from, const std::string& to) {
+    size_t start_pos = 0;
+    while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
+        str.replace(start_pos, from.length(), to);
+        start_pos += to.length(); // In case 'to' contains 'from', advance start_pos to avoid infinite loop
+    }
+}
 
 // thanks gpt3.5
 // Function to write a WAV file from floating-point data
@@ -4743,6 +4751,8 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
     {
         std::cout << tokens[i] << std::endl;
     }   
+
+    //exit(0);
     //todo see why this tokenization doesn't match the tokenization produced by tortoise-tts (tortoise tts one does not always use the token corresponding to the most characters)
 
 
@@ -5980,9 +5990,28 @@ int main(int argc, char ** argv) {
     //exit(0);
 
 
+    //std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
+    std::string message = "tortoise, full process complete.";
+
+    replaceAll(message, " " ,"[SPACE]");
+
+
+    //std::string message = "based...[SPACE]dr.[SPACE]freeman?";
+
+
+    std::vector<gpt_vocab::id> pre = ::parse_tokens_from_string("255", ',');
+    std::vector<gpt_vocab::id> post = ::parse_tokens_from_string("0", ',');
+
+    
+    std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
+
+    tokens.insert(tokens.begin(), pre.begin(), pre.end());
+    tokens.insert(tokens.end(), post.begin(), post.end());
+
+
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0", ','); // "This is a test message"
 
-    std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
+    //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
 
 
     std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive(tokens);
