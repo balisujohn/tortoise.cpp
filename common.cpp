@@ -277,10 +277,6 @@ void gpt_split_words(std::string str, std::vector<std::string>& words) {
         str = m.suffix();
     }
 
-    for (auto word: words)
-    {
-        std::cout << word << std::endl;
-    }
 }
 
 std::vector<gpt_vocab::id> gpt_tokenize(const gpt_vocab & vocab, const std::string & text) {
@@ -325,7 +321,6 @@ std::vector<gpt_vocab::id> gpt_tokenize(const gpt_vocab & vocab, const std::stri
         for (int i = 0; i < (int) word.size(); ){
             for (int j = word.size() - 1; j >= i; j--){
                 auto cand = word.substr(i, j-i+1);
-                std::cout << cand << std::endl;
                 auto it = vocab.token_to_id.find(cand);
                 if (it != vocab.token_to_id.end()){ // word.substr(i, j-i+1) in vocab
                     tokens.push_back(it->second);
