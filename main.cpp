@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 #include <random>
+#include <chrono>
 #include <functional>
 
 #if defined(_MSC_VER)
@@ -34,7 +35,16 @@
 
 int32_t NUM_RETURN_SEQUENCES = 4; //hardcoding this for now, analagous to "num_return_sequences arugment to inference_speech"
 
-std::mt19937 generator(245645656);
+
+auto now = std::chrono::system_clock::now();
+auto duration = now.time_since_epoch();
+auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
+
+// Use the milliseconds count as a seed for the random number generator
+unsigned time_seed = milliseconds.count();
+
+std::mt19937 generator(time_seed);
+
 std::uniform_real_distribution<float> distribution(0.0, 1.0);
 std::normal_distribution<double> normal_distribution(0.0,1.0);
 
@@ -5886,6 +5896,7 @@ bool mel_code_vectors_match(const std::vector<std::vector<int>>& vec1, const std
 
 void test_autoregressive(){
 
+    generator.seed(245645656);
 
     std::vector<gpt_vocab::id> tokens =  ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
 
@@ -5975,6 +5986,8 @@ int main(int argc, char ** argv) {
             message = argv[i + 1];
         } else if (std::string(argv[i]) == "--output") {
             outputPath = argv[i + 1];
+        }else if (std::string(argv[i]) == "--seed") {
+            generator.seed(std::stoi(argv[i + 1]));
         }
     }
 
