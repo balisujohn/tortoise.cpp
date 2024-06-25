@@ -28,6 +28,9 @@ make
 This is tested with Ubuntu 22.04 and cuda 12.0 and a 1070ti
 
 # Running
+
+**it's best to try short phrases first in GPU mode; long phrases fail in GPU mode with low VRAM**
+
 You will need to place `ggml-model.bin`, `ggml-vocoder-model.bin` and `ggml-diffusion-model.bin` in the models directory to run tortoise.cpp. You can download them here https://huggingface.co/balisujohn/tortoise-ggml. I will release scripts for generating these files from tortoise-tts.
 
 From the build directory, run:
