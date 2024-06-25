@@ -5002,6 +5002,27 @@ std::vector<float> load_f32_vector(const std::string &filename, size_t nBytes) {
   return floats;
 }
 
+
+
+//thanks gpt3.5!
+void progressBar(int width, int percent) {
+    std::cout << "[";
+    int pos = width * percent / 100;
+    for (int i = 0; i < width; ++i) {
+        if (i <= pos) std::cout << "=";
+        else std::cout << " ";
+    }
+    std::cout << "] " << percent << "%\r";
+    std::cout.flush();
+}
+
+void tokensSampled(int n) {
+    std::cout << "tokens sampled: " << n << "\r";
+    std::cout.flush();
+}
+
+
+
 std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>
 autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path) {
 
@@ -5173,7 +5194,7 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path) {
   int i = 0;
   while (!all_sequences_stopped) {
     samples = process_logits_and_sample(gf, mel_transformer_inputs_vector, i);
-
+    tokensSampled(i+1);
     //printVector(samples, 2, "samples");
 
     sample_string = sample_string + ",[";
@@ -6010,6 +6031,8 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
     }
     //printVector(model_sample, 3, "model_sample");
     x = model_sample;
+
+    progressBar(50, (int)(((float)diffusion_index / 80.0) * 100));
   }
 
   ggml_free(dfsn_model.ctx);
@@ -6465,7 +6488,7 @@ int main(int argc, char **argv) {
 
   std::vector<float> vocoder_noise =
       sample_normal_noise(((mel.size() / 100) + 10) * 64);
-  save_f32_vector("./logs/vocoder-noise.bin", vocoder_noise);
+  //save_f32_vector("./logs/vocoder-noise.bin", vocoder_noise);
 
   vocoder_model vocoder;
 
