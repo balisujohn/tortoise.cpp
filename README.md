@@ -2,6 +2,11 @@
 
 ![a menacing sea turtle in the ocean; mascot for tortoise.cpp](https://github.com/balisujohn/tortoise.cpp/blob/master/assets/tortoiselogo.png?raw=true)
 
+# Downloading
+clone the repository with the following command
+````
+git clone --recursive git@github.com:balisujohn/tortoise.cpp.git
+````
 # Compiling
 For now, CUDA and CPU only. To compile:
 
