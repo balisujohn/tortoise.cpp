@@ -1,47 +1,51 @@
-# tortoise.cpp: GGML implementation of tortoise-tts, under construction
+# tortoise.cpp: GGML implementation of tortoise-tts (Ready for testing!)
 
 ![a menacing sea turtle in the ocean; mascot for tortoise.cpp](https://github.com/balisujohn/tortoise.cpp/blob/master/assets/tortoiselogo.png?raw=true)
 
-Implementation status:
-
-Tokenization seems to work, but doesn't exactly match the tokenization tortoise-tts performs, needs work. 
-
-Voice latent is hardcoded for now. 
-
-Text embedding/ text position embedding reconstruction complete.
-
-Mel embedding reconstruction complete.
-
-Autoregressive model(gpt-2) reconstruction complete.
-
-Contrastive Language-Voice Pretrained Transformer reconstruction pending.
-
-Diffusion model reconstruction pending. 
-
-
 # Compiling
-For now, cuda only. To compile:
+For now, CUDA and CPU only. To compile:
+
+## Compile for CPU
 ````
 mkdir build
 cd build
-cmake ..
+cmake .. 
+make
+````
+
+## Compile for CUDA
+````
+mkdir build
+cd build
+cmake .. -DGGML_CUBLAS=ON
 make
 ````
 This is tested with Ubuntu 22.04 and cuda 12.0 and a 1070ti
 
-
 # Running
-You will need to place `ggml-model.bin` and `ggml-diffusion-model.bin` in the models directory to run tortoise.cpp. You can generate the model yourself following the instructions in this tortoise-tts reverse engineering fork here https://github.com/balisujohn/tortoise-reverse-engineering, or download it here https://huggingface.co/balisujohn/tortoise-ggml.
-
+You will need to place `ggml-model.bin`, `ggml-vocoder-model.bin` and `ggml-diffusion-model.bin` in the models directory to run tortoise.cpp. You can download them here https://huggingface.co/balisujohn/tortoise-ggml. I will release scripts for generating these files from tortoise-tts.
 
 From the build directory, run:
 ````
-./bin/tortoise
+./tortoise
+````
+here's an example that should work out of the box:
+````
+./tortoise --message "based... dr freeman?" --voice "../models/mouse.bin" --seed 0 --output "based?.wav"
+````
+all command line arguments are optional:
+
+````
+arguments:
+  --message           Specifies the message to generate, lowercase letters, spaces, and punctuation only. (default: "this is a test message." )
+  --voice             Specifies the path to the voice file to use to determine the speaker's voice.  (default: "../models/mol.bin" )
+  --output            Specifies the path where the generated wav file will be saved.                 (default: "./output.wav")
+  --seed              Specifies the seed for psuedorandom number generation, used in autoregressive sampling and diffusion sampling (default: system time seed)
 ````
 
 
 # Contributing
-If you want to contribute, please make an issue stating what you want to work on. I'll make a discord to manage contributors if there is a lot of interest. You can email me questions at \<mylastname\>u\<myfirstname\>@gmail.com. I am happy to help get people get started with contributing!
+If you want to contribute, please make an issue stating what you want to work on. DM me on twitter if you want a link to join the dev Discord, or if you have questions. I am happy to help get people get started with contributing!
 
 I am also making available a fork of tortoise-tts which has my reverse engineering annotations, and also the export script for the autoregressive model.
 
