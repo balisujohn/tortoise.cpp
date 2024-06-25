@@ -48,6 +48,25 @@ arguments:
   --seed              Specifies the seed for psuedorandom number generation, used in autoregressive sampling and diffusion sampling (default: system time seed)
 ````
 
+# How to add voices
+
+set up the original tortoise-tts, then run it with whatever voice you have, then after this line:
+https://github.com/neonbjb/tortoise-tts/blob/e2d9fba0bb5c4376d0d142efea47a448f97c4d90/tortoise/api.py#L401
+
+add this code:
+````
+numpy_array = auto_conditioning.to("cpu").numpy().astype(np.float32)  # Ensure float32 for binary format
+
+# Define the file path
+file_path = 'auto_conditioning.bin'
+
+# Save NumPy array as binary file
+numpy_array.tofile(file_path)
+
+print("saved auto conditioning")
+exit()
+````
+then you can rename `auto_conditioning.bin` to the speaker name and put the file in your models folder to use it like any other voice. This works with voices clone with `tortoise-tts`.
 
 # Contributing
 If you want to contribute, please make an issue stating what you want to work on. DM me on twitter if you want a link to join the dev Discord, or if you have questions. I am happy to help get people get started with contributing!
