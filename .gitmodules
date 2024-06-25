@@ -1,3 +1,5 @@
 [submodule "ggml"]
 	path = ggml
 	url = git@github.com:ggerganov/ggml.git
+[submodule "ggml/"]
+	url = https://github.com/balisujohn/ggml.git

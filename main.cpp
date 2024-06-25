@@ -4710,7 +4710,7 @@ std::vector<float> load_f32_vector(const std::string& filename, size_t nBytes) {
 }
 
 
-std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autoregressive(std::vector<gpt_vocab::id> tokens)
+std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path)
 {
 
 
@@ -4870,7 +4870,7 @@ std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>> autore
     struct ggml_tensor *auto_conditioning_tensor = ggml_graph_get_tensor(gf, "auto_conditioning");
 
 
-    std::vector<float> auto_conditioning_vector = load_f32_vector("../models/mol.bin", 4096);
+    std::vector<float> auto_conditioning_vector = load_f32_vector(voice_path, 4096);
 
     ggml_backend_tensor_set(auto_conditioning_tensor, auto_conditioning_vector.data(), 0, 1024*ggml_element_size(auto_conditioning_tensor));
 
@@ -5889,7 +5889,7 @@ void test_autoregressive(){
 
     std::vector<gpt_vocab::id> tokens =  ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
 
-    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive(tokens);
+    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive(tokens, "../models/mol.bin");
     
     std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
     std::vector<std::vector<int>> sequences = autoregressive_result.second;
@@ -5960,6 +5960,29 @@ int main(int argc, char ** argv) {
 
 
 
+    std::string defaultMessage = "this is a test message.";
+    std::string defaultVoicePath = "../models/mol.bin";
+    std::string defaultOutputPath = "./output.wav";
+    std::string message = defaultMessage;
+    std::string voicePath = defaultVoicePath;
+    std::string outputPath = defaultOutputPath;
+
+    // Parse command line arguments
+    for (int i = 1; i < argc - 1; ++i) {
+        if (std::string(argv[i]) == "--voice") {
+            voicePath = argv[i + 1];
+        } else if (std::string(argv[i]) == "--message") {
+            message = argv[i + 1];
+        } else if (std::string(argv[i]) == "--output") {
+            outputPath = argv[i + 1];
+        }
+    }
+
+    // Use the updated values
+    std::cout << "Message: " << message << std::endl;
+    std::cout << "Voice Path: " << voicePath << std::endl;
+
+
     
     gpt_vocab vocab;
     gpt_vocab_init("../models/tokenizer.json", vocab);
@@ -5972,7 +5995,7 @@ int main(int argc, char ** argv) {
 
     //std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
     //std::string message = "tortoise, full process complete.";
-    std::string message = "minimum viable product incoming.";
+    //std::string message = "minimum viable product incoming.";
 
 
     replaceAll(message, " " ,"[SPACE]");
@@ -5996,7 +6019,7 @@ int main(int argc, char ** argv) {
     //std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0", ','); //"Based... Dr. Freeman?"
 
 
-    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive(tokens);
+    std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>  autoregressive_result = autoregressive(tokens,voicePath);
     
     std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
     std::vector<std::vector<int>> sequences = autoregressive_result.second;
@@ -6100,7 +6123,7 @@ int main(int argc, char ** argv) {
     extract_tensor_to_vector(  vocoder_gf->nodes[vocoder_gf->n_nodes -1] , audio);
 
 
-    writeWav("based?.wav", audio , 24000);
+    writeWav(outputPath.c_str(), audio , 24000);
 
 
 
