@@ -8,10 +8,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_executable(tortoise main.cpp common.cpp)
 
-set(GGML_CUBLAS ON)
-set(GGML_USE_CUBLAS ON)
+option(GGML_CUBLAS "cuda mode" OFF)
 
-add_definitions(-DGGML_USE_CUBLAS)
+if (GGML_CUBLAS)
+    add_definitions(-DGGML_USE_CUBLAS)
+endif()
 
 add_subdirectory(ggml)
 
