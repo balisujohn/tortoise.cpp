@@ -26,6 +26,9 @@
 #include <string>
 #include <vector>
 
+
+
+
 #if defined(_MSC_VER)
 #pragma warning(disable : 4244 4267) // possible loss of data
 #endif
@@ -1967,6 +1970,9 @@ bool vocoder_model_load(const std::string &fname, vocoder_model &model) {
 
       if ((nelements * bpe) / ggml_blck_size(tensor->type) !=
           ggml_nbytes(tensor)) {
+        std::cout << tensor->ne[0] << "," << tensor->ne[1] << "," << tensor->ne[2] << "," << tensor->ne[3] << "," << std::endl;
+        std::cout << bpe << std::endl;
+        std::cout << nelements << std::endl;
         fprintf(stderr,
                 "%s: tensor '%s' has wrong size in model file: got %zu, "
                 "expected %zu\n",
@@ -5060,7 +5066,7 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path) {
 
   int64_t t_load_us = 0;
 
-  std::string file_path = "../models/ggml-model.bin";
+  std::string file_path = "..\\..\\models\\ggml-model.bin";
 
   autoregressive_model model;
 
@@ -5378,9 +5384,15 @@ get_alphas_cumulative_product(const std::vector<double> &betas) {
 
   // Calculate cumulative product
   std::vector<double> alpha_cumulative_products(alphas.size());
-  std::partial_sum(alphas.begin(), alphas.end(),
-                   alpha_cumulative_products.begin(),
-                   std::multiplies<double>());
+  double accumulator = 1;
+  for (int i = 0; i < alphas.size(); i++)
+  {
+    accumulator *= alphas[i];
+    alpha_cumulative_products[i] = accumulator;
+  }
+  ///std::partial_sum(alphas.begin(), alphas.end(),
+  ///                 alpha_cumulative_products.begin(),
+  ///                 std::multiplies<double>());
 
   return alpha_cumulative_products;
 }
@@ -5623,7 +5635,7 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
   output_shape.push_back(output_sequence_length);
 
 
-  std::string diffusion_file_path = "../models/ggml-diffusion-model.bin";
+  std::string diffusion_file_path = "..\\..\\models/ggml-diffusion-model.bin";
 
   diffusion_model dfsn_model;
 
@@ -6169,14 +6181,21 @@ bool mel_code_vectors_match(const std::vector<std::vector<int>> &vec1,
 
 void test_autoregressive() {
 
+
+
   generator.seed(245645656);
 
   std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string(
       "255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0",
       ','); //"Based... Dr. Freeman?"
 
+
+
+
   std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>
-      autoregressive_result = autoregressive(tokens, "../models/mol.bin");
+      autoregressive_result = autoregressive(tokens, "..\\..\\models\\mol.bin");
+
+
 
   std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
   std::vector<std::vector<int>> sequences = autoregressive_result.second;
@@ -6186,9 +6205,11 @@ void test_autoregressive() {
     trimmed_latents_size += trimmed_latent.size();
   }
 
+  
+
   // save_f32_vectors("../assets/target_trimmed_latents.bin", trimmed_latents);
   std::vector<float> target_trimmed_latents = load_f32_vector(
-      "../assets/target_trimmed_latents.bin",
+      "..\\..\\assets\\target_trimmed_latents.bin",
       trimmed_latents_size *
           sizeof(float)); // 4 is the number of bytes in a float.
 
@@ -6378,9 +6399,9 @@ void test_autoregressive() {
 void test_diffusion() {
 
   std::vector<float> diffusion_input =
-      load_f32_vector("../assets/diffusion_input.bin", 44032 * sizeof(float));
+      load_f32_vector("..\\..\\assets\\diffusion_input.bin", 44032 * sizeof(float));
   std::vector<float> target_mel =
-      load_f32_vector("../assets/target_mel.bin", 18700 * sizeof(float));
+      load_f32_vector("..\\..\\assets\\target_mel.bin", 18700 * sizeof(float));
   std::vector<float> mel = diffusion(diffusion_input);
   if (!vectors_match(target_mel, mel)) {
     std::cout << "mel mismatch" << std::endl;
@@ -6404,9 +6425,11 @@ void test_diffusion() {
 
 int main(int argc, char **argv) {
 
+
+
   std::string defaultMessage = "this is a test message.";
-  std::string defaultVoicePath = "../models/mol.bin";
-  std::string defaultOutputPath = "./output.wav";
+  std::string defaultVoicePath = "..\\..\\models\\mol.bin";
+  std::string defaultOutputPath = ".\\output.wav";
   std::string message = defaultMessage;
   std::string voicePath = defaultVoicePath;
   std::string outputPath = defaultOutputPath;
@@ -6426,11 +6449,12 @@ int main(int argc, char **argv) {
 
 
   gpt_vocab vocab;
-  gpt_vocab_init("../models/tokenizer.json", vocab);
+  gpt_vocab_init("..\\..\\models\\tokenizer.json", vocab);
+
 
   //test_autoregressive();
   //test_diffusion();
-  //exit(0);
+  //return 0;
 
   // std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
   // std::string message = "tortoise, full process complete.";
@@ -6474,7 +6498,7 @@ int main(int argc, char **argv) {
   // std::vector<float> mel = load_f32_vector("./logs/mel.bin", 187 * 100 *
   // sizeof(float));
 
-  std::string vocoder_model_file_path = "../models/ggml-vocoder-model.bin";
+  std::string vocoder_model_file_path = "..\\..\\models\\ggml-vocoder-model.bin";
 
   denormalize_tacotron_mel(mel);
   //printVector(mel, 3, "denormalized_mel");
