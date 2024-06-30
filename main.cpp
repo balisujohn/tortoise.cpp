@@ -56,6 +56,8 @@ void localAssert(bool condition) {
   }
 }
 
+// clang-format off
+
 /*
 
   ██████╗ ██████╗ ████████╗   ██████╗
@@ -81,6 +83,8 @@ void localAssert(bool condition) {
 
 
 */
+
+// clang-format on
 
 // derived from ggml gpt2 reference implementation
 struct gpt2_layer {
@@ -138,6 +142,8 @@ struct autoregressive_model {
   ggml_backend_t backend = NULL;
 };
 
+// clang-format off
+
 /*
 
  ██████╗ ██╗███████╗███████╗██╗   ██╗███████╗██╗ ██████╗ ███╗   ██╗
@@ -161,6 +167,8 @@ struct autoregressive_model {
  ██║ ╚═╝ ██║██║  ██║██║ ╚████║██║██║     ███████╗███████║   ██║
  ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝╚═╝     ╚══════╝╚══════╝   ╚═╝
 */
+
+// clang-format on
 
 struct latent_conditioner_attention_block {
 
@@ -293,6 +301,8 @@ struct diffusion_model {
   ggml_backend_t backend = NULL;
 };
 
+// clang-format off
+
 /*                                        
                                                                   
  ██╗   ██╗ ██████╗  ██████╗ ██████╗ ██████╗ ███████╗██████╗       
@@ -317,6 +327,8 @@ struct diffusion_model {
  ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝╚═╝     ╚══════╝╚══════╝   ╚═╝   
 
 */
+// clang-format on
+
 
 struct residual_conv_block {
   struct ggml_tensor *residual_convs_1_bias;
@@ -439,6 +451,8 @@ void extract_tensor_to_vector(ggml_tensor *tensor, std::vector<float> &vector) {
   ggml_backend_tensor_get(tensor, vector.data(), 0, sizeof(float) * elements);
 }
 
+// clang-format off
+
 /*
 
   ██████╗ ██████╗ ████████╗   ██████╗
@@ -463,6 +477,8 @@ void extract_tensor_to_vector(ggml_tensor *tensor, std::vector<float> &vector) {
  ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝
 
 */
+// clang-format on
+
 // derived from  gpt2_model_load(const std::string & fname, gpt2_model & model,
 // gpt_vocab & vocab, int n_ctx, int n_gpu_layers) {
 bool autoregressive_model_load(const std::string &fname,
@@ -882,6 +898,8 @@ bool autoregressive_model_load(const std::string &fname,
   return true;
 }
 
+// clang-format off
+
 /*
 
  ██████╗ ██╗███████╗███████╗██╗   ██╗███████╗██╗ ██████╗ ███╗   ██╗
@@ -907,6 +925,8 @@ bool autoregressive_model_load(const std::string &fname,
 
 
 */
+
+// clang-format on
 
 // derived from  gpt2_model_load(const std::string & fname, gpt2_model & model,
 // gpt_vocab & vocab, int n_ctx, int n_gpu_layers) {
@@ -1615,6 +1635,8 @@ bool diffusion_model_load(const std::string &fname, diffusion_model &model) {
   return true;
 }
 
+// clang-format off
+
 /*
 
  ██╗   ██╗ ██████╗  ██████╗ ██████╗ ██████╗ ███████╗██████╗
@@ -1639,6 +1661,8 @@ bool diffusion_model_load(const std::string &fname, diffusion_model &model) {
  ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝
 
 */
+
+// clang-format on
 
 bool vocoder_model_load(const std::string &fname, vocoder_model &model) {
   printf("%s: loading model from '%s'\n", __func__, fname.c_str());
@@ -1998,26 +2022,35 @@ bool vocoder_model_load(const std::string &fname, vocoder_model &model) {
   return true;
 }
 
+// clang-format off
+
 /*
-
-  ██████╗ ██████╗ ████████╗   ██████╗     ██╗      █████╗ ████████╗███████╗███╗
- ██╗████████╗    ███████╗ ██████╗ ██████╗ ██╗    ██╗ █████╗ ██████╗ ██████╗
- ██████╗  █████╗ ███████╗███████╗ ██╔════╝ ██╔══██╗╚══██╔══╝   ╚════██╗    ██║
- ██╔══██╗╚══██╔══╝██╔════╝████╗  ██║╚══██╔══╝    ██╔════╝██╔═══██╗██╔══██╗██║
- ██║██╔══██╗██╔══██╗██╔══██╗    ██╔══██╗██╔══██╗██╔════╝██╔════╝ ██║
- ███╗██████╔╝   ██║█████╗ █████╔╝    ██║     ███████║   ██║   █████╗  ██╔██╗ ██║
- ██║       █████╗  ██║   ██║██████╔╝██║ █╗ ██║███████║██████╔╝██║  ██║
- ██████╔╝███████║███████╗███████╗ ██║   ██║██╔═══╝    ██║╚════╝██╔═══╝     ██║
- ██╔══██║   ██║   ██╔══╝  ██║╚██╗██║   ██║       ██╔══╝  ██║
- ██║██╔══██╗██║███╗██║██╔══██║██╔══██╗██║  ██║    ██╔═══╝
- ██╔══██║╚════██║╚════██║ ╚██████╔╝██║        ██║      ███████╗    ███████╗██║
- ██║   ██║   ███████╗██║ ╚████║   ██║       ██║     ╚██████╔╝██║
- ██║╚███╔███╔╝██║  ██║██║  ██║██████╔╝    ██║     ██║  ██║███████║███████║
-  ╚═════╝ ╚═╝        ╚═╝      ╚══════╝    ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝
- ╚═══╝   ╚═╝       ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝
- ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝
-
+ 
+  ██████╗ ██████╗ ████████╗   ██████╗                
+ ██╔════╝ ██╔══██╗╚══██╔══╝   ╚════██╗               
+ ██║  ███╗██████╔╝   ██║█████╗ █████╔╝               
+ ██║   ██║██╔═══╝    ██║╚════╝██╔═══╝                
+ ╚██████╔╝██║        ██║      ███████╗               
+  ╚═════╝ ╚═╝        ╚═╝      ╚══════╝               
+                                                     
+ ██╗      █████╗ ████████╗███████╗███╗   ██╗████████╗
+ ██║     ██╔══██╗╚══██╔══╝██╔════╝████╗  ██║╚══██╔══╝
+ ██║     ███████║   ██║   █████╗  ██╔██╗ ██║   ██║   
+ ██║     ██╔══██║   ██║   ██╔══╝  ██║╚██╗██║   ██║   
+ ███████╗██║  ██║   ██║   ███████╗██║ ╚████║   ██║   
+ ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═══╝   ╚═╝   
+                                                     
+  ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗           
+ ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║           
+ ██║  ███╗██████╔╝███████║██████╔╝███████║           
+ ██║   ██║██╔══██╗██╔══██║██╔═══╝ ██╔══██║           
+ ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║           
+  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝           
+                                                     
+ 
 */
+
+// clang-format on
 
 struct ggml_cgraph *autoregressive_latent_graph(
     const autoregressive_model &model,
@@ -2487,30 +2520,31 @@ struct ggml_cgraph *autoregressive_latent_graph(
   return gf;
 }
 
+// clang-format off
+
+
 /*
-
-  ██████╗ ██████╗ ████████╗   ██████╗
- ██╔════╝ ██╔══██╗╚══██╔══╝   ╚════██╗
- ██║  ███╗██████╔╝   ██║█████╗ █████╔╝
- ██║   ██║██╔═══╝    ██║╚════╝██╔═══╝
- ╚██████╔╝██║        ██║      ███████╗
-  ╚═════╝ ╚═╝        ╚═╝      ╚══════╝
-
- ███████╗ ██████╗ ██████╗ ██╗    ██╗ █████╗ ██████╗ ██████╗
- ██╔════╝██╔═══██╗██╔══██╗██║    ██║██╔══██╗██╔══██╗██╔══██╗
- █████╗  ██║   ██║██████╔╝██║ █╗ ██║███████║██████╔╝██║  ██║
- ██╔══╝  ██║   ██║██╔══██╗██║███╗██║██╔══██║██╔══██╗██║  ██║
- ██║     ╚██████╔╝██║  ██║╚███╔███╔╝██║  ██║██║  ██║██████╔╝
- ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝
-
- ██████╗  █████╗ ███████╗███████╗
- ██╔══██╗██╔══██╗██╔════╝██╔════╝
- ██████╔╝███████║███████╗███████╗
- ██╔═══╝ ██╔══██║╚════██║╚════██║
- ██║     ██║  ██║███████║███████║
- ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝
-
+ 
+  ██████╗ ██████╗ ████████╗   ██████╗     
+ ██╔════╝ ██╔══██╗╚══██╔══╝   ╚════██╗    
+ ██║  ███╗██████╔╝   ██║█████╗ █████╔╝    
+ ██║   ██║██╔═══╝    ██║╚════╝██╔═══╝     
+ ╚██████╔╝██║        ██║      ███████╗    
+  ╚═════╝ ╚═╝        ╚═╝      ╚══════╝    
+                                          
+  ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗
+ ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║
+ ██║  ███╗██████╔╝███████║██████╔╝███████║
+ ██║   ██║██╔══██╗██╔══██║██╔═══╝ ██╔══██║
+ ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║
+  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝
+                                          
+ 
 */
+
+
+// clang-format on
+
 struct ggml_cgraph *
 autoregressive_graph(const autoregressive_model &model,
                      const std::vector<int> mel_transformer_inputs_vector,
@@ -3032,6 +3066,9 @@ autoregressive_graph(const autoregressive_model &model,
   return gf;
 }
 
+// clang-format off
+
+
 /*
  
  ██████╗ ██╗███████╗███████╗██╗   ██╗███████╗██╗ ██████╗ ███╗   ██╗    
@@ -3050,6 +3087,8 @@ autoregressive_graph(const autoregressive_model &model,
                                                                        
  
 */
+
+// clang-format on
 
 struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
                                     std::vector<float> &latent,
@@ -4031,6 +4070,9 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
   return gf;
 }
 
+// clang-format off
+
+
 /*
  
  ██╗   ██╗ ██████╗  ██████╗ ██████╗ ██████╗ ███████╗██████╗ 
@@ -4047,6 +4089,9 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
  ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║                  
   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝                  
 */
+
+// clang-format on
+
 
 
 struct ggml_cgraph *vocoder_graph(struct vocoder_model &model,
@@ -4467,6 +4512,9 @@ struct ggml_cgraph *vocoder_graph(struct vocoder_model &model,
   return gf;
 }
 
+// clang-format off
+
+
 /*
  
  ██╗  ██╗███████╗██╗     ██████╗ ███████╗██████╗                           
@@ -4485,6 +4533,9 @@ struct ggml_cgraph *vocoder_graph(struct vocoder_model &model,
                                                                            
  
 */
+
+// clang-format on
+
 
 // great work openchat3.5!!!
 void apply_padding(std::vector<int> &vec) {
@@ -6044,6 +6095,94 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
   return x;
 }
 
+std::vector<float> vocoder(std::vector<float> mel)
+{
+
+  std::string vocoder_model_file_path = "../models/ggml-vocoder-model.bin";
+
+  denormalize_tacotron_mel(mel);
+  //printVector(mel, 3, "denormalized_mel");
+
+  std::vector<float> padding(1000);
+  for (int i = 0; i < 1000; i++) {
+    padding[i] = -11.5129;
+  }
+
+  // while(true);
+
+  std::vector<float> vocoder_noise =
+      sample_normal_noise(((mel.size() / 100) + 10) * 64);
+  //save_f32_vector("./logs/vocoder-noise.bin", vocoder_noise);
+
+  vocoder_model vocoder;
+
+  // load the model
+  {
+    if (!vocoder_model_load(vocoder_model_file_path, vocoder)) {
+      fprintf(stderr, "%s: failed to load model from '%s'\n", __func__,
+              vocoder_model_file_path.c_str());
+      exit(1);
+    }
+  }
+
+  ggml_gallocr_t vocoder_allocr = NULL;
+
+  vocoder_allocr =
+      ggml_gallocr_new(ggml_backend_get_default_buffer_type(vocoder.backend));
+
+  struct ggml_cgraph *measure_gf = vocoder_graph(vocoder, mel, padding);
+
+  //std::cout << "graph created" << std::endl;
+  // compute the required memory
+  size_t vocoder_mem_size = ggml_gallocr_get_buffer_size(vocoder_allocr, 0);
+
+  ggml_gallocr_reserve(vocoder_allocr, measure_gf);
+  size_t mem_size = ggml_gallocr_get_buffer_size(vocoder_allocr, 0);
+  fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__,
+          mem_size / 1024.0 / 1024.0);
+
+  struct ggml_cgraph *vocoder_gf = vocoder_graph(vocoder, mel, padding);
+  ggml_gallocr_alloc_graph(vocoder_allocr, vocoder_gf);
+
+  struct ggml_tensor *mel_tensor =
+      ggml_graph_get_tensor(vocoder_gf, "mel_tensor");
+
+  ggml_backend_tensor_set(mel_tensor, mel.data(), 0,
+                          mel.size() * ggml_element_size(mel_tensor));
+
+  struct ggml_tensor *padding_tensor =
+      ggml_graph_get_tensor(vocoder_gf, "padding_tensor");
+
+  ggml_backend_tensor_set(padding_tensor, padding.data(), 0,
+                          1000 * ggml_element_size(padding_tensor));
+
+  struct ggml_tensor *noise_tensor =
+      ggml_graph_get_tensor(vocoder_gf, "vocoder_noise_tensor");
+
+  ggml_backend_tensor_set(noise_tensor, vocoder_noise.data(), 0,
+                          vocoder_noise.size() *
+                              ggml_element_size(padding_tensor));
+
+  //std::cout << "reached computing time" << std::endl;
+  ggml_backend_graph_compute(vocoder.backend, vocoder_gf);
+
+  // extract_tensor_to_vector(ggml_graph_get_tensor(vocoder_gf, "output"),
+  // model_output);
+  //std::cout << "reached" << std::endl;
+  //print_all_tensors(vocoder_gf, false, true, "vocoder_output");
+  //print_all_tensors(vocoder_gf, true, true, "vocoder_output");
+
+  std::vector<float> audio = std::vector<float>();
+
+  extract_tensor_to_vector(vocoder_gf->nodes[vocoder_gf->n_nodes - 1], audio);
+
+  ggml_gallocr_free(vocoder_allocr);
+
+  return audio;
+
+}
+
+// clang-format off
 /*
 
  ████████╗███████╗███████╗████████╗██╗███╗   ██╗ ██████╗
@@ -6055,6 +6194,7 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
 
 
 */
+// clang-format on
 
 // thanks gpt3.5 !
 void save_f32_vectors(const std::string &filename,
@@ -6128,7 +6268,8 @@ bool vectors_match(const std::vector<float> &vec1,
                    const std::vector<float> &vec2) {
   // Check if lengths match
   if (vec1.size() != vec2.size()) {
-    std::cout << "size problem" << std::endl;
+    std::cout << "size problem: " << vec1.size() << " " << vec2.size() << std::endl;
+
     return false;
   }
 
@@ -6169,7 +6310,15 @@ bool mel_code_vectors_match(const std::vector<std::vector<int>> &vec1,
 
 void test_autoregressive() {
 
-  generator.seed(245645656);
+  //loading rng state
+  // https://stackoverflow.com/a/42386852 used for reference
+  std::ifstream fin("../assets/test_autoregressive_seed.bin");
+  fin >> generator;
+  fin.close();
+  std::ifstream fin2("../assets/test_autoregressive_distribution.bin");
+  fin2 >> distribution;
+  fin2.close();
+  
 
   std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string(
       "255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0",
@@ -6377,6 +6526,18 @@ void test_autoregressive() {
 
 void test_diffusion() {
 
+
+  // load rng state
+  // https://stackoverflow.com/a/42386852 used for reference
+  std::ifstream fin("../assets/test_diffusion_seed.bin");
+  fin >> generator;
+  fin.close();
+  std::ifstream fin2("../assets/test_diffusion_normal_distribution.bin");
+  fin2 >> distribution;
+  fin2.close();
+  
+
+
   std::vector<float> diffusion_input =
       load_f32_vector("../assets/diffusion_input.bin", 44032 * sizeof(float));
   std::vector<float> target_mel =
@@ -6390,6 +6551,26 @@ void test_diffusion() {
   std::cout << "DIFFUSION TEST SUCCESS!" << std::endl;
 }
 
+void test_vocoder() {
+
+
+
+  std::vector<float> vocoder_input =
+      load_f32_vector("../assets/target_mel.bin", 18700 * sizeof(float));
+
+  std::vector<float> target_audio = load_f32_vector("../assets/target_audio.bin", 50426 * sizeof(float));
+
+  std::vector<float> audio = vocoder(vocoder_input);
+  if (!vectors_match(target_audio, audio)) {
+    std::cout << "mel mismatch" << std::endl;
+    exit(1);
+  }
+
+  std::cout << "VOCODER TEST SUCCESS!" << std::endl;
+}
+
+// clang-format off
+
 /*
 
  ███╗   ███╗ █████╗ ██╗███╗   ██╗
@@ -6401,6 +6582,9 @@ void test_diffusion() {
 
 
 */
+
+// clang-format on
+
 
 int main(int argc, char **argv) {
 
@@ -6430,15 +6614,11 @@ int main(int argc, char **argv) {
 
   //test_autoregressive();
   //test_diffusion();
+  //test_vocoder();
+  //std::cout <<"all tests succeeded!" << std::endl;
   //exit(0);
 
-  // std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
-  // std::string message = "tortoise, full process complete.";
-  // std::string message = "minimum viable product incoming.";
-
   replaceAll(message, " ", "[SPACE]");
-
-  // std::string message = "based...[SPACE]dr.[SPACE]freeman?";
 
   std::vector<gpt_vocab::id> pre = ::parse_tokens_from_string("255", ',');
   std::vector<gpt_vocab::id> post = ::parse_tokens_from_string("0", ',');
@@ -6448,113 +6628,21 @@ int main(int argc, char **argv) {
   tokens.insert(tokens.begin(), pre.begin(), pre.end());
   tokens.insert(tokens.end(), post.begin(), post.end());
 
-  // std::vector<gpt_vocab::id> tokens =
-  // ::parse_tokens_from_string("255,147,2,54,2,14,2,33,218,2,26,61,150,112,0,0",
-  // ','); // "This is a test message"
-
-  // std::vector<gpt_vocab::id> tokens =
-  // ::parse_tokens_from_string("255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0",
-  // ','); //"Based... Dr. Freeman?"
-
   std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>
       autoregressive_result = autoregressive(tokens, voicePath);
 
   std::vector<std::vector<float>> trimmed_latents = autoregressive_result.first;
   std::vector<std::vector<int>> sequences = autoregressive_result.second;
 
-  // while(true);
-
   std::vector<float> mel = diffusion(trimmed_latents[0]);
 
-  //save_f32_vector("./logs/diffusion_input.bin", trimmed_latents[0]);
-  //std::cout << trimmed_latents[0].size() << std::endl;
-  //save_f32_vector("./logs/mel.bin", mel);
-  //std::cout << mel.size() << std::endl;
 
-  // std::vector<float> mel = load_f32_vector("./logs/mel.bin", 187 * 100 *
-  // sizeof(float));
+  std::vector<float> audio = vocoder(mel);
 
-  std::string vocoder_model_file_path = "../models/ggml-vocoder-model.bin";
-
-  denormalize_tacotron_mel(mel);
-  //printVector(mel, 3, "denormalized_mel");
-
-  std::vector<float> padding(1000);
-  for (int i = 0; i < 1000; i++) {
-    padding[i] = -11.5129;
-  }
-
-  // while(true);
-
-  std::vector<float> vocoder_noise =
-      sample_normal_noise(((mel.size() / 100) + 10) * 64);
-  //save_f32_vector("./logs/vocoder-noise.bin", vocoder_noise);
-
-  vocoder_model vocoder;
-
-  // load the model
-  {
-    if (!vocoder_model_load(vocoder_model_file_path, vocoder)) {
-      fprintf(stderr, "%s: failed to load model from '%s'\n", __func__,
-              vocoder_model_file_path.c_str());
-      exit(1);
-    }
-  }
-
-  ggml_gallocr_t vocoder_allocr = NULL;
-
-  vocoder_allocr =
-      ggml_gallocr_new(ggml_backend_get_default_buffer_type(vocoder.backend));
-
-  struct ggml_cgraph *measure_gf = vocoder_graph(vocoder, mel, padding);
-
-  //std::cout << "graph created" << std::endl;
-  // compute the required memory
-  size_t vocoder_mem_size = ggml_gallocr_get_buffer_size(vocoder_allocr, 0);
-
-  ggml_gallocr_reserve(vocoder_allocr, measure_gf);
-  size_t mem_size = ggml_gallocr_get_buffer_size(vocoder_allocr, 0);
-  fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__,
-          mem_size / 1024.0 / 1024.0);
-
-  struct ggml_cgraph *vocoder_gf = vocoder_graph(vocoder, mel, padding);
-  ggml_gallocr_alloc_graph(vocoder_allocr, vocoder_gf);
-
-  struct ggml_tensor *mel_tensor =
-      ggml_graph_get_tensor(vocoder_gf, "mel_tensor");
-
-  ggml_backend_tensor_set(mel_tensor, mel.data(), 0,
-                          mel.size() * ggml_element_size(mel_tensor));
-
-  struct ggml_tensor *padding_tensor =
-      ggml_graph_get_tensor(vocoder_gf, "padding_tensor");
-
-  ggml_backend_tensor_set(padding_tensor, padding.data(), 0,
-                          1000 * ggml_element_size(padding_tensor));
-
-  struct ggml_tensor *noise_tensor =
-      ggml_graph_get_tensor(vocoder_gf, "vocoder_noise_tensor");
-
-  ggml_backend_tensor_set(noise_tensor, vocoder_noise.data(), 0,
-                          vocoder_noise.size() *
-                              ggml_element_size(padding_tensor));
-
-  //std::cout << "reached computing time" << std::endl;
-  ggml_backend_graph_compute(vocoder.backend, vocoder_gf);
-
-  // extract_tensor_to_vector(ggml_graph_get_tensor(vocoder_gf, "output"),
-  // model_output);
-  //std::cout << "reached" << std::endl;
-  //print_all_tensors(vocoder_gf, false, true, "vocoder_output");
-  //print_all_tensors(vocoder_gf, true, true, "vocoder_output");
-
-  std::vector<float> audio = std::vector<float>();
-
-  extract_tensor_to_vector(vocoder_gf->nodes[vocoder_gf->n_nodes - 1], audio);
+  //save_f32_vector("./target_audio.bin", audio);
 
   writeWav(outputPath.c_str(), audio, 24000);
 
-  ggml_gallocr_free(vocoder_allocr);
 
   return 0;
 }
