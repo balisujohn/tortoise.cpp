@@ -329,7 +329,6 @@ struct diffusion_model {
 */
 // clang-format on
 
-
 struct residual_conv_block {
   struct ggml_tensor *residual_convs_1_bias;
   struct ggml_tensor *residual_convs_1_weight;
@@ -360,7 +359,6 @@ struct vocoder_residual_block {
   struct ggml_tensor *convolution_t_pre_bias;
 
   std::vector<conv_block> conv_blocks;
-
 };
 
 // model tether
@@ -2055,8 +2053,7 @@ bool vocoder_model_load(const std::string &fname, vocoder_model &model) {
 struct ggml_cgraph *autoregressive_latent_graph(
     const autoregressive_model &model,
     const std::vector<int> mel_transformer_inputs_vector,
-    const std::vector<gpt_vocab::id> &tokens,
-    const int batch_size) {
+    const std::vector<gpt_vocab::id> &tokens, const int batch_size) {
   const int token_count = tokens.size();
   // std::cout << "token count: " << token_count << std::endl;
   // exit(0);
@@ -2088,7 +2085,6 @@ struct ggml_cgraph *autoregressive_latent_graph(
   ggml_set_name(conditioning_latent, "auto_conditioning");
 
   ggml_build_forward_expand(gf, input);
-
 
   // ggml_set_name(input, "text input codes");
 
@@ -2134,13 +2130,13 @@ struct ggml_cgraph *autoregressive_latent_graph(
       ggml_add(ctx0, text_embedding, text_position_embedding);
   ggml_set_name(embedding, "final text embedding");
 
-
   ggml_build_forward_expand(gf, embedding);
   ggml_build_forward_expand(gf, mel_embedding);
 
-  embedding = ggml_reshape_4d(ctx0, embedding, 1024, token_count, batch_size, 1);
-  mel_embedding =
-      ggml_reshape_4d(ctx0, mel_embedding, 1024, mel_token_count / batch_size, batch_size, 1);
+  embedding =
+      ggml_reshape_4d(ctx0, embedding, 1024, token_count, batch_size, 1);
+  mel_embedding = ggml_reshape_4d(ctx0, mel_embedding, 1024,
+                                  mel_token_count / batch_size, batch_size, 1);
 
   embedding = ggml_cont(ctx0, ggml_permute(ctx0, embedding, 0, 2, 1, 3));
   mel_embedding =
@@ -2161,24 +2157,20 @@ struct ggml_cgraph *autoregressive_latent_graph(
 
   // repeated_latent = ggml_reshape_4d(ctx0, repeated_latent,1024, 1, 4, 1);
 
-
   repeated_latent = ggml_repeat(ctx0, reshaped_latent, repeated_latent);
 
-  repeated_latent =
-      ggml_cont(ctx0, ggml_reshape_4d(ctx0, repeated_latent, 1024, batch_size, 1, 1));
+  repeated_latent = ggml_cont(
+      ctx0, ggml_reshape_4d(ctx0, repeated_latent, 1024, batch_size, 1, 1));
 
   output = ggml_concat(ctx0, repeated_latent, output, 2);
-
 
   ggml_set_name(output, "output");
 
   int test_dimension = output->ne[2];
   int n_past = 0;
 
-
   struct ggml_tensor *cur =
       ggml_cont(ctx0, ggml_permute(ctx0, output, 0, 2, 1, 3));
-
 
   struct ggml_tensor *Qcur;
   struct ggml_tensor *Kcur;
@@ -2202,9 +2194,9 @@ struct ggml_cgraph *autoregressive_latent_graph(
 
   for (int i = 0; i < 30; i++) {
 
-    residual = ggml_cpy(
-        ctx0, cur,
-        ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, 1024, test_dimension, batch_size, 1));
+    residual = ggml_cpy(ctx0, cur,
+                        ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, 1024,
+                                           test_dimension, batch_size, 1));
 
     // ggml_build_forward_expand(gf, residual);
     // layer norm
@@ -2275,8 +2267,8 @@ struct ggml_cgraph *autoregressive_latent_graph(
     cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32, 3, cur->ne));
 
     // derived from ggml reference gpt-2 implementation
-    Qcur = ggml_cont(ctx0, ggml_view_3d(ctx0, cur, 1024, test_dimension, batch_size,
-                                        cur->nb[1], cur->nb[2], 0));
+    Qcur = ggml_cont(ctx0, ggml_view_3d(ctx0, cur, 1024, test_dimension,
+                                        batch_size, cur->nb[1], cur->nb[2], 0));
 
     // Kcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_4d(ctx0, cur, 1024,
     // test_dimension, 4, 1,cur->nb[1], cur->nb[2],cur->nb[3], 1024 *
@@ -2308,10 +2300,11 @@ struct ggml_cgraph *autoregressive_latent_graph(
     // num heads 16
     // head dim 64
 
-    Q = ggml_cont(ctx0, ggml_permute(ctx0,
-                                     ggml_reshape_4d(ctx0, Qcur, 64, 16,
-                                                     test_dimension, batch_size),
-                                     0, 2, 1, 3));
+    Q = ggml_cont(ctx0,
+                  ggml_permute(ctx0,
+                               ggml_reshape_4d(ctx0, Qcur, 64, 16,
+                                               test_dimension, batch_size),
+                               0, 2, 1, 3));
 
     // this is likely not general and but should work for the first layer, may
     // need generalizing once we reach
@@ -2321,15 +2314,17 @@ struct ggml_cgraph *autoregressive_latent_graph(
     //             1024 * (test_dimension + n_past) * 4 ,
     //             (ggml_element_size(model.memory_key)* (i * 404 * 1024 * 4) ))
     //             , 64,16, 4 , test_dimension + n_past), 0, 2,3, 1));
-    K = ggml_cont(ctx0, ggml_permute(ctx0,
-                                     ggml_reshape_4d(ctx0, Kcur, 64, 16, batch_size,
-                                                     test_dimension),
-                                     0, 2, 3, 1));
+    K = ggml_cont(ctx0,
+                  ggml_permute(ctx0,
+                               ggml_reshape_4d(ctx0, Kcur, 64, 16, batch_size,
+                                               test_dimension),
+                               0, 2, 3, 1));
 
     V_transposed = ggml_cont(
-        ctx0, ggml_permute(
-                  ctx0, ggml_reshape_4d(ctx0, Vcur, 64, 16, batch_size, test_dimension),
-                  1, 2, 3, 0));
+        ctx0, ggml_permute(ctx0,
+                           ggml_reshape_4d(ctx0, Vcur, 64, 16, batch_size,
+                                           test_dimension),
+                           1, 2, 3, 0));
 
     //   V_transposed = ggml_cont(ctx0,ggml_permute(ctx0,
     //               ggml_reshape_4d(ctx0, ggml_view_1d(ctx0,
@@ -2346,7 +2341,6 @@ struct ggml_cgraph *autoregressive_latent_graph(
     // std::cout << "KQ shape" << std::endl;
     // std::cout << KQ->ne[0]  << KQ->ne[1] << KQ->ne[2]  << KQ->ne[3] <<
     // std::endl;
-
 
     // KQ = ggml_reshape_1d(ctx0, KQ, KQ->ne[0]* KQ->ne[1]*KQ->ne[2]*KQ->ne[3]);
 
@@ -2378,7 +2372,8 @@ struct ggml_cgraph *autoregressive_latent_graph(
 
     //"merge heads" operation
     KQV_merged = ggml_permute(ctx0, KQV, 0, 2, 1, 3);
-    KQV_merged = ggml_cont_3d(ctx0, KQV_merged, 1024, test_dimension, batch_size);
+    KQV_merged =
+        ggml_cont_3d(ctx0, KQV_merged, 1024, test_dimension, batch_size);
 
     cur = ggml_mul_mat(
         ctx0,
@@ -2467,10 +2462,11 @@ struct ggml_cgraph *autoregressive_latent_graph(
     // Either ggml had a pre-existing bug for batch addition, or one of my
     // modifications introduced it. This will need to be addressed.
 
-    cur = ggml_add(ctx0,
-                   ggml_reshape_1d(ctx0, cur, 1024 * test_dimension * batch_size * 1),
-                   ggml_reshape_1d(ctx0, feed_forward_residual,
-                                   1024 * test_dimension * batch_size * 1));
+    cur = ggml_add(
+        ctx0,
+        ggml_reshape_1d(ctx0, cur, 1024 * test_dimension * batch_size * 1),
+        ggml_reshape_1d(ctx0, feed_forward_residual,
+                        1024 * test_dimension * batch_size * 1));
 
     cur = ggml_reshape_4d(ctx0, cur, 1024, test_dimension, batch_size, 1);
     // cur = ggml_add(ctx0, cur, feed_forward_residual);
@@ -2489,9 +2485,9 @@ struct ggml_cgraph *autoregressive_latent_graph(
 
   cur = ggml_norm(ctx0, cur, 1e-05);
 
-  cur = ggml_cont(ctx0, ggml_view_4d(ctx0, cur, 1024, test_dimension - 1, batch_size, 1,
-                                     cur->nb[1], cur->nb[2], cur->nb[3],
-                                     (1) * sizeof(float) * 1024));
+  cur = ggml_cont(ctx0, ggml_view_4d(ctx0, cur, 1024, test_dimension - 1,
+                                     batch_size, 1, cur->nb[1], cur->nb[2],
+                                     cur->nb[3], (1) * sizeof(float) * 1024));
 
   ggml_tensor *temp_language_model_head_layer_norm_weights =
       ggml_repeat(ctx0, model.language_model_head_layer_norm_weights,
@@ -2502,16 +2498,17 @@ struct ggml_cgraph *autoregressive_latent_graph(
   cur = ggml_mul(ctx0, cur, temp_language_model_head_layer_norm_weights);
   cur = ggml_add(ctx0, cur, model.language_model_head_layer_norm_bias);
 
-  ggml_tensor *final_output = ggml_cont(
-      ctx0, ggml_view_4d(ctx0, cur, 1024, token_count, batch_size, 1, cur->nb[1],
-                         cur->nb[2], cur->nb[3], (1) * sizeof(float) * 1024));
+  ggml_tensor *final_output =
+      ggml_cont(ctx0, ggml_view_4d(ctx0, cur, 1024, token_count, batch_size, 1,
+                                   cur->nb[1], cur->nb[2], cur->nb[3],
+                                   (1) * sizeof(float) * 1024));
 
   // std::cout << "mel token count: " << mel_token_count << std::endl;
 
-  ggml_tensor *final_output_2 =
-      ggml_cont(ctx0, ggml_view_4d(ctx0, cur, 1024, (mel_token_count / batch_size) - 2,
-                                   batch_size, 1, cur->nb[1], cur->nb[2], cur->nb[3],
-                                   (token_count) * sizeof(float) * 1024));
+  ggml_tensor *final_output_2 = ggml_cont(
+      ctx0, ggml_view_4d(ctx0, cur, 1024, (mel_token_count / batch_size) - 2,
+                         batch_size, 1, cur->nb[1], cur->nb[2], cur->nb[3],
+                         (token_count) * sizeof(float) * 1024));
 
   ggml_set_name(final_output_2, "cur");
 
@@ -2543,7 +2540,6 @@ struct ggml_cgraph *autoregressive_latent_graph(
  
 */
 
-
 // clang-format on
 
 struct ggml_cgraph *
@@ -2551,8 +2547,7 @@ autoregressive_graph(const autoregressive_model &model,
                      const std::vector<int> mel_transformer_inputs_vector,
                      const std::vector<gpt_vocab::id> &tokens,
                      const bool fake_inputs, const int n_past,
-                     const int fixed_position,
-                     const int batch_size) {
+                     const int fixed_position, const int batch_size) {
 
   const int token_count = tokens.size();
 
@@ -2591,7 +2586,6 @@ autoregressive_graph(const autoregressive_model &model,
   if (fake_inputs) // 4 corresponds to batch of 4 sequences each with length 1
   {
 
-
     struct ggml_tensor *text_embedding =
         ggml_get_rows(ctx0, model.text_embedding_weights, input);
     struct ggml_tensor *text_position_embedding =
@@ -2617,9 +2611,10 @@ autoregressive_graph(const autoregressive_model &model,
 
     ggml_build_forward_expand(gf, mel_transformer_inputs);
 
-    struct ggml_tensor *truncated_mel_transformer_inputs = ggml_new_tensor_1d(
-        ctx0, GGML_TYPE_I32,
-        batch_size); // hardcoding this instead of slicing it from mel_transformer_inputs
+    struct ggml_tensor *truncated_mel_transformer_inputs =
+        ggml_new_tensor_1d(ctx0, GGML_TYPE_I32,
+                           batch_size); // hardcoding this instead of slicing it
+                                        // from mel_transformer_inputs
 
     ggml_set_name(truncated_mel_transformer_inputs,
                   "input_mel_tokens_truncated");
@@ -2650,14 +2645,13 @@ autoregressive_graph(const autoregressive_model &model,
     output = ggml_reshape_1d(ctx0, output, (tokens.size() + 1) * 1024);
 
     repeated_output = ggml_repeat(ctx0, output, repeated_output);
-    repeated_output =
-        ggml_reshape_4d(ctx0, repeated_output, 1024, (tokens.size() + 1), batch_size, 1);
+    repeated_output = ggml_reshape_4d(ctx0, repeated_output, 1024,
+                                      (tokens.size() + 1), batch_size, 1);
 
     repeated_output =
         ggml_cont(ctx0, ggml_permute(ctx0, repeated_output, 0, 2, 1, 3));
 
     ggml_set_name(repeated_output, "repeated_output");
-
 
     gpt2_input = ggml_concat(ctx0, repeated_output, mel_embedding, 2);
 
@@ -2700,7 +2694,6 @@ autoregressive_graph(const autoregressive_model &model,
 
   int test_dimension = gpt2_input->ne[1];
 
-
   struct ggml_tensor *cur = ggml_cont(ctx0, gpt2_input);
 
   struct ggml_tensor *Qcur;
@@ -2724,9 +2717,9 @@ autoregressive_graph(const autoregressive_model &model,
   struct ggml_tensor *test;
   for (int i = 0; i < 30; i++) {
 
-    residual = ggml_cpy(
-        ctx0, cur,
-        ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, 1024, test_dimension, batch_size, 1));
+    residual = ggml_cpy(ctx0, cur,
+                        ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, 1024,
+                                           test_dimension, batch_size, 1));
 
     // ggml_build_forward_expand(gf, residual);
     // layer norm
@@ -2797,8 +2790,8 @@ autoregressive_graph(const autoregressive_model &model,
     cur = ggml_cpy(ctx0, cur, ggml_new_tensor(ctx0, GGML_TYPE_F32, 3, cur->ne));
 
     // derived from ggml reference gpt-2 implementation
-    Qcur = ggml_cont(ctx0, ggml_view_3d(ctx0, cur, 1024, test_dimension, batch_size,
-                                        cur->nb[1], cur->nb[2], 0));
+    Qcur = ggml_cont(ctx0, ggml_view_3d(ctx0, cur, 1024, test_dimension,
+                                        batch_size, cur->nb[1], cur->nb[2], 0));
 
     // Kcur = ggml_cont(ctx0,ggml_permute(ctx0,ggml_view_4d(ctx0, cur, 1024,
     // test_dimension, 4, 1,cur->nb[1], cur->nb[2],cur->nb[3], 1024 *
@@ -2817,25 +2810,26 @@ autoregressive_graph(const autoregressive_model &model,
                                   cur->nb[1], cur->nb[2], 2048 * sizeof(float)),
                      0, 2, 1, 3));
 
-    struct ggml_tensor *k =
-        ggml_view_1d(ctx0, model.memory_key, 1024 * test_dimension * batch_size,
-                     (ggml_element_size(model.memory_key) *
-                      ((i * 404 * 1024 * batch_size) + ((n_past)*1024 * batch_size))));
+    struct ggml_tensor *k = ggml_view_1d(
+        ctx0, model.memory_key, 1024 * test_dimension * batch_size,
+        (ggml_element_size(model.memory_key) *
+         ((i * 404 * 1024 * batch_size) + ((n_past)*1024 * batch_size))));
     ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, k));
 
-    struct ggml_tensor *v =
-        ggml_view_1d(ctx0, model.memory_value, 1024 * test_dimension * batch_size,
-                     (ggml_element_size(model.memory_value) *
-                      ((i * 404 * 1024 * batch_size) + ((n_past)*1024 * batch_size))));
+    struct ggml_tensor *v = ggml_view_1d(
+        ctx0, model.memory_value, 1024 * test_dimension * batch_size,
+        (ggml_element_size(model.memory_value) *
+         ((i * 404 * 1024 * batch_size) + ((n_past)*1024 * batch_size))));
     ggml_build_forward_expand(gf, ggml_cpy(ctx0, Vcur, v));
 
     // num heads 16
     // head dim 64
 
-    Q = ggml_cont(ctx0, ggml_permute(ctx0,
-                                     ggml_reshape_4d(ctx0, Qcur, 64, 16,
-                                                     test_dimension, batch_size),
-                                     0, 2, 1, 3));
+    Q = ggml_cont(ctx0,
+                  ggml_permute(ctx0,
+                               ggml_reshape_4d(ctx0, Qcur, 64, 16,
+                                               test_dimension, batch_size),
+                               0, 2, 1, 3));
 
     // this is likely not general and but should work for the first layer, may
     // need generalizing once we reach
@@ -2844,25 +2838,28 @@ autoregressive_graph(const autoregressive_model &model,
         ctx0,
         ggml_permute(
             ctx0,
-            ggml_reshape_4d(ctx0,
-                            ggml_view_1d(ctx0, model.memory_key,
-                                         1024 * (test_dimension + n_past) * batch_size,
-                                         (ggml_element_size(model.memory_key) *
-                                          (i * 404 * 1024 * batch_size))),
-                            64, 16, batch_size, test_dimension + n_past), // flagged possible batch size
+            ggml_reshape_4d(
+                ctx0,
+                ggml_view_1d(ctx0, model.memory_key,
+                             1024 * (test_dimension + n_past) * batch_size,
+                             (ggml_element_size(model.memory_key) *
+                              (i * 404 * 1024 * batch_size))),
+                64, 16, batch_size,
+                test_dimension + n_past), // flagged possible batch size
             0, 2, 3, 1));
 
     V_transposed = ggml_cont(
         ctx0,
-        ggml_permute(ctx0,
-                     ggml_reshape_4d(
-                         ctx0,
-                         ggml_view_1d(ctx0, model.memory_value,
-                                      1024 * (test_dimension + n_past) * batch_size,
-                                      (ggml_element_size(model.memory_value) *
-                                       (i * 404 * 1024 * batch_size))),
-                         64, 16, batch_size, test_dimension + n_past),
-                     1, 2, 3, 0));
+        ggml_permute(
+            ctx0,
+            ggml_reshape_4d(
+                ctx0,
+                ggml_view_1d(ctx0, model.memory_value,
+                             1024 * (test_dimension + n_past) * batch_size,
+                             (ggml_element_size(model.memory_value) *
+                              (i * 404 * 1024 * batch_size))),
+                64, 16, batch_size, test_dimension + n_past),
+            1, 2, 3, 0));
 
     KQ = ggml_mul_mat(ctx0, K, Q);
 
@@ -2885,7 +2882,8 @@ autoregressive_graph(const autoregressive_model &model,
 
     //"merge heads" operation
     KQV_merged = ggml_permute(ctx0, KQV, 0, 2, 1, 3);
-    KQV_merged = ggml_cont_3d(ctx0, KQV_merged, 1024, test_dimension, batch_size);
+    KQV_merged =
+        ggml_cont_3d(ctx0, KQV_merged, 1024, test_dimension, batch_size);
 
     cur = ggml_mul_mat(
         ctx0,
@@ -2974,10 +2972,11 @@ autoregressive_graph(const autoregressive_model &model,
     // Either ggml had a pre-existing bug for batch addition, or one of my
     // modifications introduced it. This will need to be addressed.
 
-    cur = ggml_add(ctx0,
-                   ggml_reshape_1d(ctx0, cur, 1024 * test_dimension * batch_size * 1),
-                   ggml_reshape_1d(ctx0, feed_forward_residual,
-                                   1024 * test_dimension * batch_size * 1));
+    cur = ggml_add(
+        ctx0,
+        ggml_reshape_1d(ctx0, cur, 1024 * test_dimension * batch_size * 1),
+        ggml_reshape_1d(ctx0, feed_forward_residual,
+                        1024 * test_dimension * batch_size * 1));
 
     cur = ggml_reshape_4d(ctx0, cur, 1024, test_dimension, batch_size, 1);
     // cur = ggml_add(ctx0, cur, feed_forward_residual);
@@ -3008,13 +3007,14 @@ autoregressive_graph(const autoregressive_model &model,
   cur = ggml_add(ctx0, cur, model.language_model_head_linear_bias);
 
   ggml_tensor *next_token_logits = ggml_cont(
-      ctx0,
-      ggml_view_4d(ctx0, cur, 8194, 1, batch_size, 1, cur->nb[1], cur->nb[2], cur->nb[3],
-                   (test_dimension - 1) * sizeof(float) *
-                       8194)); // this "test_dimension - 1" business slices off
-                               // the last batch of logits
+      ctx0, ggml_view_4d(ctx0, cur, 8194, 1, batch_size, 1, cur->nb[1],
+                         cur->nb[2], cur->nb[3],
+                         (test_dimension - 1) * sizeof(float) *
+                             8194)); // this "test_dimension - 1" business
+                                     // slices off the last batch of logits
 
-  next_token_logits = ggml_reshape_4d(ctx0, next_token_logits, 8194, batch_size, 1, 1);
+  next_token_logits =
+      ggml_reshape_4d(ctx0, next_token_logits, 8194, batch_size, 1, 1);
 
   ggml_set_name(next_token_logits, "next token logits");
 
@@ -3024,17 +3024,15 @@ autoregressive_graph(const autoregressive_model &model,
   // ggml_tensor * score = ggml_gather(ctx0, next_token_logits,
   // mel_transformer_inputs, 1);
 
-  //std::cout << "didn't reach here" << std::endl;
+  // std::cout << "didn't reach here" << std::endl;
 
   ggml_build_forward_expand(gf, next_token_logits);
-
-
 
   // embd_w.resize(n_vocab);
   // memcpy(embd_w.data(), (float *) ggml_get_data(inpL) + (n_vocab*(N-1)),
   // sizeof(float)*n_vocab);
 
-  //std::cout << "reached end graph build" << std::endl;
+  // std::cout << "reached end graph build" << std::endl;
 
   ggml_free(ctx0);
 
@@ -4067,8 +4065,6 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
 // clang-format on
 
-
-
 struct ggml_cgraph *vocoder_graph(struct vocoder_model &model,
                                   std::vector<float> &mel_vector,
                                   std::vector<float> &padding_vector) {
@@ -4381,7 +4377,6 @@ struct ggml_cgraph *vocoder_graph(struct vocoder_model &model,
 
       output = ggml_pad_ext(ctx0, output, 1, 1, 0, 0, 0, 0, 0, 0);
 
-    
       output = ggml_unfold_1d(ctx0, output, hop_sizes[i] + 2 * padding_length,
                               hop_sizes[i]);
 
@@ -4511,7 +4506,6 @@ struct ggml_cgraph *vocoder_graph(struct vocoder_model &model,
 
 // clang-format on
 
-
 // great work openchat3.5!!!
 void apply_padding(std::vector<int> &vec) {
   // Remove any trailing 8139's from the vector
@@ -4574,10 +4568,12 @@ std::vector<float> apply_penalty(const std::vector<float> score,
   return result;
 }
 
-std::vector<float> gather(std::vector<float> src, std::vector<int> input_ids, int batch_size) {
+std::vector<float> gather(std::vector<float> src, std::vector<int> input_ids,
+                          int batch_size) {
 
   const int sequence_length = input_ids.size() / batch_size;
-  const int vocab_size = src.size() / batch_size; // this is 8194, hardcoding for now
+  const int vocab_size =
+      src.size() / batch_size; // this is 8194, hardcoding for now
 
   std::vector<float> result(input_ids.size());
 
@@ -4599,7 +4595,8 @@ std::vector<float> scatter(std::vector<float> src1, std::vector<float> src2,
   std::copy(src1.begin(), src1.end(), result.begin());
 
   const int sequence_length = input_ids.size() / batch_size;
-  const int vocab_size = src1.size() / batch_size; // this is 8194, hardcoding for now
+  const int vocab_size =
+      src1.size() / batch_size; // this is 8194, hardcoding for now
 
   // std::vector<float> result(input_ids.size());
 
@@ -4611,7 +4608,7 @@ std::vector<float> scatter(std::vector<float> src1, std::vector<float> src2,
 
     result[rowIndex * vocab_size + colIndex] = src2[i];
   }
-  //printVector(result, 3, "scatter_result");
+  // printVector(result, 3, "scatter_result");
   return result;
 }
 
@@ -4748,7 +4745,6 @@ std::vector<int> get_relative_position_buckets(int latent_length) {
     }
   }
 
-
   return mask;
 }
 
@@ -4757,12 +4753,9 @@ std::vector<int> get_relative_position_buckets(int latent_length) {
 std::vector<int>
 process_logits_and_sample(ggml_cgraph *gf,
                           std::vector<int> &mel_transformer_inputs_vector,
-                          int index,
-                          int batch_size) {
+                          int index, int batch_size) {
 
   ggml_tensor *next_token_logits = gf->nodes[gf->n_nodes - 1];
-
- 
 
   // save_f32_tensor(next_token_logits, "logs/next_token_logits_" +
   // std::to_string(index) +   ".data");
@@ -4774,12 +4767,12 @@ process_logits_and_sample(ggml_cgraph *gf,
   ggml_backend_tensor_get(next_token_logits, next_token_logits_vector.data(), 0,
                           sizeof(float) * elements);
 
-
-  std::vector<float> gather_result =
-      gather(next_token_logits_vector, mel_transformer_inputs_vector, batch_size);
+  std::vector<float> gather_result = gather(
+      next_token_logits_vector, mel_transformer_inputs_vector, batch_size);
   gather_result = apply_penalty(gather_result, 2.0);
-  std::vector<float> transformed_mel_transformer_inputs_vector = scatter(
-      next_token_logits_vector, gather_result, mel_transformer_inputs_vector, batch_size);
+  std::vector<float> transformed_mel_transformer_inputs_vector =
+      scatter(next_token_logits_vector, gather_result,
+              mel_transformer_inputs_vector, batch_size);
 
   std::vector<int> samples(batch_size); // batch size is 4
 
@@ -4808,7 +4801,7 @@ process_logits_and_sample(ggml_cgraph *gf,
     }
   }
   // probs
-  //printValuesAboveThreshold(probs, .01);
+  // printValuesAboveThreshold(probs, .01);
   return samples;
 }
 
@@ -5027,30 +5020,28 @@ std::vector<float> load_f32_vector(const std::string &filename, size_t nBytes) {
   return floats;
 }
 
-
-
-//thanks gpt3.5!
+// thanks gpt3.5!
 void progressBar(int width, int percent) {
-    std::cout << "[";
-    int pos = width * percent / 100;
-    for (int i = 0; i < width; ++i) {
-        if (i <= pos) std::cout << "=";
-        else std::cout << " ";
-    }
-    std::cout << "] " << percent << "%\r";
-    std::cout.flush();
+  std::cout << "[";
+  int pos = width * percent / 100;
+  for (int i = 0; i < width; ++i) {
+    if (i <= pos)
+      std::cout << "=";
+    else
+      std::cout << " ";
+  }
+  std::cout << "] " << percent << "%\r";
+  std::cout.flush();
 }
 
 void tokensSampled(int n) {
-    std::cout << "tokens sampled: " << n << "\r";
-    std::cout.flush();
+  std::cout << "tokens sampled: " << n << "\r";
+  std::cout.flush();
 }
 
-
-
 std::pair<std::vector<std::vector<float>>, std::vector<std::vector<int>>>
-autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int batch_size) {
-
+autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path,
+               int batch_size) {
 
   // std::string message = "this[SPACE]is[SPACE]a[SPACE]test[SPACE]message";
   // std::vector<gpt_vocab::id> tokens = ::gpt_tokenize(vocab, message);
@@ -5073,7 +5064,6 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
   // ','); // "The United States must not adopt the tactics of the enemy. Means
   // are important, as ends. Crisis makes it tempting to ignore the wise
   // restraints that make men free." - Frank Church
-
 
   // exit(0);
   // todo see why this tokenization doesn't match the tokenization produced by
@@ -5102,7 +5092,6 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
     t_load_us = ggml_time_us() - t_start_us;
   }
 
-
   std::vector<int> mel_transformer_inputs_vector = std::vector<int>();
   mel_transformer_inputs_vector.resize((tokens.size() + 2) * batch_size);
   // assert(tokens.size() == 16);
@@ -5130,20 +5119,19 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
   // compute the required memory
   ggml_gallocr_reserve(allocr, measure_gf);
   size_t mem_size = ggml_gallocr_get_buffer_size(allocr, 0);
-  //fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__,
-  //        mem_size / 1024.0 / 1024.0);
-  // recreate the allocator with the required memory
-  // ggml_allocr_reset(allocr);
-  // allocr = ggml_gallocr_new(model.backend);
-  // gf = autoregressive_graph(model,mel_transformer_inputs_vector, tokens,
-  // true, 0,0); ggml_allocr_alloc_graph(allocr, gf); std::cout << "reached
-  // computing time" << std::endl;
+  // fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__,
+  //         mem_size / 1024.0 / 1024.0);
+  //  recreate the allocator with the required memory
+  //  ggml_allocr_reset(allocr);
+  //  allocr = ggml_gallocr_new(model.backend);
+  //  gf = autoregressive_graph(model,mel_transformer_inputs_vector, tokens,
+  //  true, 0,0); ggml_allocr_alloc_graph(allocr, gf); std::cout << "reached
+  //  computing time" << std::endl;
 
   struct ggml_cgraph *gf = autoregressive_graph(
       model, mel_transformer_inputs_vector, tokens, true, 0, 0, batch_size);
 
   ggml_gallocr_alloc_graph(allocr, gf);
-
 
   struct ggml_tensor *input_tokens_tensor =
       ggml_graph_get_tensor(gf, "input_tokens");
@@ -5151,7 +5139,6 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
   int token_count = tokens.size();
   ggml_backend_tensor_set(input_tokens_tensor, tokens.data(), 0,
                           token_count * ggml_element_size(input_tokens_tensor));
-
 
   struct ggml_tensor *input_position_tensor =
       ggml_graph_get_tensor(gf, "input_position");
@@ -5165,13 +5152,11 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
   struct ggml_tensor *input_mel_tokens_tensor =
       ggml_graph_get_tensor(gf, "input_mel_tokens");
 
-
   for (int i = 0; i < mel_transformer_inputs_vector.size(); ++i) {
     int v = mel_transformer_inputs_vector[i];
     ggml_backend_tensor_set(input_mel_tokens_tensor, &v, i * sizeof(int32_t),
                             sizeof(v));
   }
-
 
   struct ggml_tensor *input_mel_tokens_truncated_tensor =
       ggml_graph_get_tensor(gf, "input_mel_tokens_truncated");
@@ -5181,7 +5166,6 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
     ggml_backend_tensor_set(input_mel_tokens_truncated_tensor, &start_mel_token,
                             i * sizeof(int32_t), sizeof(start_mel_token));
   }
-
 
   struct ggml_tensor *input_mel_position_tensor =
       ggml_graph_get_tensor(gf, "input_mel_position");
@@ -5212,10 +5196,10 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
   int i = 0;
   while (!all_sequences_stopped) {
 
+    samples = process_logits_and_sample(gf, mel_transformer_inputs_vector, i,
+                                        batch_size);
 
-    samples = process_logits_and_sample(gf, mel_transformer_inputs_vector, i, batch_size);
-
-    tokensSampled(i+1);
+    tokensSampled(i + 1);
 
     sample_string = sample_string + ",[";
 
@@ -5265,12 +5249,11 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
   }
   // ggml_allocr_free(allocr);
 
-  //print_all_tensors(gf, false, true, "next token logits");
+  // print_all_tensors(gf, false, true, "next token logits");
 
   for (int i = 0; i < batch_size; i++) {
     apply_padding(sequences[i]);
   }
-
 
   mel_transformer_inputs_vector.clear();
   for (int c = 0; c < batch_size; c++) {
@@ -5294,14 +5277,14 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
   latent_allocr =
       ggml_gallocr_new(ggml_backend_get_default_buffer_type(model.backend));
 
-  struct ggml_cgraph *latent_measure_gf =
-      autoregressive_latent_graph(model, mel_transformer_inputs_vector, tokens, batch_size);
+  struct ggml_cgraph *latent_measure_gf = autoregressive_latent_graph(
+      model, mel_transformer_inputs_vector, tokens, batch_size);
   // ggml_graph_print(gf);
 
   // compute the required memoryautoregresc__, latent_mem_size/1024.0/1024.0);
 
-  struct ggml_cgraph *latent_gf =
-      autoregressive_latent_graph(model, mel_transformer_inputs_vector, tokens, batch_size);
+  struct ggml_cgraph *latent_gf = autoregressive_latent_graph(
+      model, mel_transformer_inputs_vector, tokens, batch_size);
 
   token_count = tokens.size();
   int mel_token_count = mel_transformer_inputs_vector.size();
@@ -5359,7 +5342,7 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
   ggml_backend_graph_compute(model.backend, latent_gf);
 
   // print_all_tensors(latent_gf, true, true, "cur");
-  //print_all_tensors(latent_gf, false, true, "cur");
+  // print_all_tensors(latent_gf, false, true, "cur");
 
   // compare_to_saved_tensor_with_name(ggml_graph_get_tensor(latent_gf, "cur"));
   // exit(0);
@@ -5379,8 +5362,6 @@ autoregressive(std::vector<gpt_vocab::id> tokens, std::string voice_path, int ba
 
   std::vector<std::vector<float>> trimmed_latents =
       trim_latents(latents, sequences);
-
- 
 
   return std::make_pair(trimmed_latents, sequences);
 }
@@ -5577,7 +5558,7 @@ std::vector<float> predict_xstart_from_eps(float sqrt_recip_alphas_cumprod,
     result[i] =
         sqrt_recip_alphas_cumprod * x[i] - sqrt_recipm1_alphas_cumprod * eps[i];
   }
-  //printVector(result, 3, "prior to clamp");
+  // printVector(result, 3, "prior to clamp");
   for (size_t i = 0; i < x.size(); ++i) {
     if (result[i] > 1.0) {
       result[i] = 1.0;
@@ -5635,13 +5616,11 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
   int length = trimmed_latents.size() / 1024;
   int output_sequence_length = length * 4 * 24000 / 22050;
 
-
   std::vector<int> output_shape;
 
   output_shape.push_back(1);
   output_shape.push_back(100);
   output_shape.push_back(output_sequence_length);
-
 
   std::string diffusion_file_path = "../models/ggml-diffusion-model.bin";
 
@@ -5655,7 +5634,6 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
       exit(1);
     }
   }
-
 
   std::vector<float> noise = sample_normal_noise(100 * output_sequence_length);
   // save_f32_vector("./logs/diffusion_noise.bin", noise);
@@ -5779,8 +5757,8 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
 
       ggml_gallocr_reserve(diffusion_allocr, measure_gf);
       size_t mem_size = ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
-      //fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__,
-      //        mem_size / 1024.0 / 1024.0);
+      // fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__,
+      //         mem_size / 1024.0 / 1024.0);
 
       struct ggml_cgraph *diffusion_gf =
           diffusion_graph(dfsn_model, trimmed_latents, output_sequence_length,
@@ -5896,7 +5874,7 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
 
       ggml_gallocr_reserve(diffusion_allocr, measure_gf);
       size_t mem_size = ggml_gallocr_get_buffer_size(diffusion_allocr, 0);
-     // fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__,
+      // fprintf(stderr, "%s: compute buffer size: %.2f MB\n", __func__,
       //        mem_size / 1024.0 / 1024.0);
 
       struct ggml_cgraph *diffusion_gf =
@@ -5985,9 +5963,9 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
       ggml_gallocr_free(diffusion_allocr);
     }
 
-    //printVector(model_output, 3, "model_output");
-    //printVector(model_output_no_conditioning, 3,
-     //           "model_output_no_conditioning");
+    // printVector(model_output, 3, "model_output");
+    // printVector(model_output_no_conditioning, 3,
+    //            "model_output_no_conditioning");
 
     int split_index = 100 * output_sequence_length;
 
@@ -5999,14 +5977,13 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
         model_output_no_conditioning.begin(),
         model_output_no_conditioning.begin() + split_index);
 
-    //printVector(model_output_means, 3, "model_output_means");
-    //printVector(model_output_no_conditioning_means, 3,
-    //            "model_output_no_conditioning_means");
-    //printVector(model_output_vars, 3, "model_output_vars");
+    // printVector(model_output_means, 3, "model_output_means");
+    // printVector(model_output_no_conditioning_means, 3,
+    //             "model_output_no_conditioning_means");
+    // printVector(model_output_vars, 3, "model_output_vars");
 
-    //printVector(posterior_log_variance_clipped, 3,
-    //            "Posterior Log Variance Clipped");
-
+    // printVector(posterior_log_variance_clipped, 3,
+    //             "Posterior Log Variance Clipped");
 
     float max_log = log(beta_schedule[79 - diffusion_index]);
 
@@ -6020,23 +5997,23 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
 
     calculate_model_variance(model_output_vars, model_log_variance, min_log,
                              max_log);
-    //printVector(model_output_vars, 3, "model_output_vars");
+    // printVector(model_output_vars, 3, "model_output_vars");
 
     blend_output_with_unconditioned_output(model_output_means,
                                            model_output_no_conditioning_means,
                                            conditioning_free_k);
-    //printVector(model_output_means, 3, "model_output_means");
+    // printVector(model_output_means, 3, "model_output_means");
 
     std::vector<float> x_start_pred = predict_xstart_from_eps(
         sqrt_reciprocal_alphas_cumprod[79 - diffusion_index],
         sqrt_reciprocal_minus_one_alphas_cumprod[79 - diffusion_index], x,
         model_output_means);
-    //printVector(x_start_pred, 3, "x_start_pred");
+    // printVector(x_start_pred, 3, "x_start_pred");
 
     std::vector<float> final_model_mean = q_posterior_mean(
         posterior_mean_coef1[79 - diffusion_index],
         posterior_mean_coef2[79 - diffusion_index], x, x_start_pred);
-    //printVector(final_model_mean, 3, "final_model_mean");
+    // printVector(final_model_mean, 3, "final_model_mean");
 
     std::vector<float> model_sample;
 
@@ -6049,7 +6026,7 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
     } else {
       model_sample = final_model_mean;
     }
-    //printVector(model_sample, 3, "model_sample");
+    // printVector(model_sample, 3, "model_sample");
     x = model_sample;
 
     progressBar(50, (int)(((float)diffusion_index / 80.0) * 100));
@@ -6064,13 +6041,12 @@ std::vector<float> diffusion(std::vector<float> trimmed_latents) {
   return x;
 }
 
-std::vector<float> vocoder(std::vector<float> mel)
-{
+std::vector<float> vocoder(std::vector<float> mel) {
 
   std::string vocoder_model_file_path = "../models/ggml-vocoder-model.bin";
 
   denormalize_tacotron_mel(mel);
-  //printVector(mel, 3, "denormalized_mel");
+  // printVector(mel, 3, "denormalized_mel");
 
   std::vector<float> padding(1000);
   for (int i = 0; i < 1000; i++) {
@@ -6081,7 +6057,7 @@ std::vector<float> vocoder(std::vector<float> mel)
 
   std::vector<float> vocoder_noise =
       sample_normal_noise(((mel.size() / 100) + 10) * 64);
-  //save_f32_vector("./logs/vocoder-noise.bin", vocoder_noise);
+  // save_f32_vector("./logs/vocoder-noise.bin", vocoder_noise);
 
   vocoder_model vocoder;
 
@@ -6101,8 +6077,8 @@ std::vector<float> vocoder(std::vector<float> mel)
 
   struct ggml_cgraph *measure_gf = vocoder_graph(vocoder, mel, padding);
 
-  //std::cout << "graph created" << std::endl;
-  // compute the required memory
+  // std::cout << "graph created" << std::endl;
+  //  compute the required memory
   size_t vocoder_mem_size = ggml_gallocr_get_buffer_size(vocoder_allocr, 0);
 
   ggml_gallocr_reserve(vocoder_allocr, measure_gf);
@@ -6132,14 +6108,14 @@ std::vector<float> vocoder(std::vector<float> mel)
                           vocoder_noise.size() *
                               ggml_element_size(padding_tensor));
 
-  //std::cout << "reached computing time" << std::endl;
+  // std::cout << "reached computing time" << std::endl;
   ggml_backend_graph_compute(vocoder.backend, vocoder_gf);
 
   // extract_tensor_to_vector(ggml_graph_get_tensor(vocoder_gf, "output"),
   // model_output);
-  //std::cout << "reached" << std::endl;
-  //print_all_tensors(vocoder_gf, false, true, "vocoder_output");
-  //print_all_tensors(vocoder_gf, true, true, "vocoder_output");
+  // std::cout << "reached" << std::endl;
+  // print_all_tensors(vocoder_gf, false, true, "vocoder_output");
+  // print_all_tensors(vocoder_gf, true, true, "vocoder_output");
 
   std::vector<float> audio = std::vector<float>();
 
@@ -6148,7 +6124,6 @@ std::vector<float> vocoder(std::vector<float> mel)
   ggml_gallocr_free(vocoder_allocr);
 
   return audio;
-
 }
 
 // clang-format off
@@ -6237,7 +6212,8 @@ bool vectors_match(const std::vector<float> &vec1,
                    const std::vector<float> &vec2) {
   // Check if lengths match
   if (vec1.size() != vec2.size()) {
-    std::cout << "size problem: " << vec1.size() << " " << vec2.size() << std::endl;
+    std::cout << "size problem: " << vec1.size() << " " << vec2.size()
+              << std::endl;
 
     return false;
   }
@@ -6279,15 +6255,14 @@ bool mel_code_vectors_match(const std::vector<std::vector<int>> &vec1,
 
 void test_autoregressive() {
 
-  //loading rng state
-  // https://stackoverflow.com/a/42386852 used for reference
+  // loading rng state
+  //  https://stackoverflow.com/a/42386852 used for reference
   std::ifstream fin("../assets/test_autoregressive_seed.bin");
   fin >> generator;
   fin.close();
   std::ifstream fin2("../assets/test_autoregressive_distribution.bin");
   fin2 >> distribution;
   fin2.close();
-  
 
   std::vector<gpt_vocab::id> tokens = ::parse_tokens_from_string(
       "255,15,55,49,9,9,9,2,134,16,51,31,2,19,46,18,176,13,0,0",
@@ -6495,7 +6470,6 @@ void test_autoregressive() {
 
 void test_diffusion() {
 
-
   // load rng state
   // https://stackoverflow.com/a/42386852 used for reference
   std::ifstream fin("../assets/test_diffusion_seed.bin");
@@ -6504,8 +6478,6 @@ void test_diffusion() {
   std::ifstream fin2("../assets/test_diffusion_normal_distribution.bin");
   fin2 >> distribution;
   fin2.close();
-  
-
 
   std::vector<float> diffusion_input =
       load_f32_vector("../assets/diffusion_input.bin", 44032 * sizeof(float));
@@ -6522,12 +6494,11 @@ void test_diffusion() {
 
 void test_vocoder() {
 
-
-
   std::vector<float> vocoder_input =
       load_f32_vector("../assets/target_mel.bin", 18700 * sizeof(float));
 
-  std::vector<float> target_audio = load_f32_vector("../assets/target_audio.bin", 50426 * sizeof(float));
+  std::vector<float> target_audio =
+      load_f32_vector("../assets/target_audio.bin", 50426 * sizeof(float));
 
   std::vector<float> audio = vocoder(vocoder_input);
   if (!vectors_match(target_audio, audio)) {
@@ -6554,7 +6525,6 @@ void test_vocoder() {
 
 // clang-format on
 
-
 int main(int argc, char **argv) {
 
   std::string defaultMessage = "this is a test message.";
@@ -6577,15 +6547,14 @@ int main(int argc, char **argv) {
     }
   }
 
-
   gpt_vocab vocab;
   gpt_vocab_init("../models/tokenizer.json", vocab);
 
-  //test_autoregressive();
-  //test_diffusion();
-  //test_vocoder();
-  //std::cout <<"all tests succeeded!" << std::endl;
-  //exit(0);
+  // test_autoregressive();
+  // test_diffusion();
+  // test_vocoder();
+  // std::cout <<"all tests succeeded!" << std::endl;
+  // exit(0);
 
   replaceAll(message, " ", "[SPACE]");
 
@@ -6605,13 +6574,11 @@ int main(int argc, char **argv) {
 
   std::vector<float> mel = diffusion(trimmed_latents[0]);
 
-
   std::vector<float> audio = vocoder(mel);
 
-  //save_f32_vector("./target_audio.bin", audio);
+  // save_f32_vector("./target_audio.bin", audio);
 
   writeWav(outputPath.c_str(), audio, 24000);
-
 
   return 0;
 }
