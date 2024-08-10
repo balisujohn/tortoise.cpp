@@ -1,8 +1,8 @@
-#include "ggml/ggml-alloc.h"
-#include "ggml/ggml-backend.h"
-#include "ggml/ggml.h"
+#include "ggml/include/ggml-alloc.h"
+#include "ggml/include/ggml-backend.h"
+#include "ggml/include/ggml.h"
 
-#ifdef GGML_USE_CUBLAS
+#ifdef GGML_USE_CUDA
 #include "ggml-cuda.h"
 #endif
 
@@ -31,6 +31,7 @@
 #endif
 
 #define GPT2_MAX_NODES 4096
+#define TORTOISE_NORM_EPSILON 1e-8
 
 int32_t NUM_RETURN_SEQUENCES =
     4; // hardcoding this for now, analagous to "num_return_sequences arugment
@@ -545,87 +546,52 @@ bool autoregressive_model_load(const std::string &fname,
 
   size_t buffer_size = 0;
 
-  buffer_size +=
-      256 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // text embedding weights
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 256 * 1024); // text embedding weights
 
-  buffer_size +=
-      404 * 1024 *
-      ggml_type_sizef(GGML_TYPE_F32); // text position embedding weights
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 404 * 1024); // text position embedding weights
 
-  buffer_size +=
-      1 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // conditioning latent
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1 * 1024); // conditioning latent
 
-  buffer_size +=
-      8194 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // mel embedding weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 8194 * 1024); // mel embedding weight
 
-  buffer_size +=
-      608 * 1024 *
-      ggml_type_sizef(GGML_TYPE_F32); // mel position embedding weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 608 * 1024); // mel position embedding weight
 
   for (int i = 0; i < 30; i++) {
     // todo fix this
-    buffer_size += 1024 * ggml_type_sizef(
-                              GGML_TYPE_F32); // inference model linear 1 weight
-    buffer_size +=
-        1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model linear 1 bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // inference model linear 1 weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // inference model linear 1 bias
 
-    buffer_size +=
-        1024 * 3072 *
-        ggml_type_sizef(GGML_TYPE_F32); // inference model attention weight
-    buffer_size +=
-        3072 * ggml_type_sizef(GGML_TYPE_F32); // inference model attention bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 3072); // inference model attention weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 3072); // inference model attention bias
 
-    buffer_size +=
-        1024 * 1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // inference model attention projection weight
-    buffer_size +=
-        1024 * ggml_type_sizef(
-                   GGML_TYPE_F32); // inference model attention projection bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024); // inference model attention projection weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // inference model attention projection bias
 
-    buffer_size += 1024 * ggml_type_sizef(
-                              GGML_TYPE_F32); // inference model linear 2 weight
-    buffer_size +=
-        1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model linear 2 bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // inference model linear 2 weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // inference model linear 2 bias
 
-    buffer_size +=
-        1024 * 4096 *
-        ggml_type_sizef(GGML_TYPE_F32); // inference model multi layer
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 4096); // inference model multi layer
                                         // perceptron fully connected weight
-    buffer_size += 4096 * ggml_type_sizef(
-                              GGML_TYPE_F32); // inference model multi layer
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 4096); // inference model multi layer
                                               // perceptron fully connected bais
 
-    buffer_size +=
-        4096 * 1024 *
-        ggml_type_sizef(GGML_TYPE_F32); // inference model multi layer
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 4096 * 1024); // inference model multi layer
                                         // perceptron projection weight
-    buffer_size +=
-        1024 * ggml_type_sizef(GGML_TYPE_F32); // inference model multi layer
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // inference model multi layer
                                                // perceptron projection bais
   }
 
-  buffer_size += 404 * 30 * ggml_type_sizef(GGML_TYPE_F32) * 1024 *
-                 4; // key cache (memory_key)
-  buffer_size += 404 * 30 * ggml_type_sizef(GGML_TYPE_F32) * 1024 *
-                 4; // value cache (memory_value)
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 404 * 30 * 1024 * 4); // key cache (memory_value)
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 404 * 30 * 1024 * 4); // value cache (memory_value)
 
-  buffer_size +=
-      1024 * ggml_type_sizef(GGML_TYPE_F32); // final layer norm weight
-  buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // final layer norm bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // final layer norm weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // final layer norm bias
 
-  buffer_size +=
-      1024 *
-      ggml_type_sizef(GGML_TYPE_F32); // language model head layer norm weight
-  buffer_size +=
-      1024 *
-      ggml_type_sizef(GGML_TYPE_F32); // language model head layer norm bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // language model head layer norm weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // language model head layer norm bias
 
-  buffer_size +=
-      1024 * 8194 *
-      ggml_type_sizef(GGML_TYPE_F32); // language model head linear weight
-  buffer_size +=
-      8194 * ggml_type_sizef(GGML_TYPE_F32); // language model head linear bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 8194); // language model head linear weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 8194); // language model head linear bias
 
   printf("%s: ggml tensor size    = %d bytes\n", __func__,
          (int)sizeof(ggml_tensor));
@@ -646,7 +612,7 @@ bool autoregressive_model_load(const std::string &fname,
   }
 
   // initialize the backend
-#ifdef GGML_USE_CUBLAS
+#ifdef GGML_USE_CUDA
   fprintf(stderr, "%s: using CUDA backend\n", __func__);
   model.backend = ggml_backend_cuda_init(0);
   if (!model.backend) {
@@ -950,243 +916,143 @@ bool diffusion_model_load(const std::string &fname, diffusion_model &model) {
 
   size_t buffer_size = 0;
 
-  buffer_size +=
-      1 * 2048 * ggml_type_sizef(GGML_TYPE_F32); // conditioning latent
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1 * 2048); // conditioning latent
 
-  buffer_size += 1024 * 1024 * 3 *
-                 ggml_type_sizef(GGML_TYPE_F32); // latent conditioning weight
-  buffer_size +=
-      1024 * ggml_type_sizef(GGML_TYPE_F32); // latent conditioning bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024 * 3); // latent conditioning weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // latent conditioning bias
 
   for (int i = 0; i < 4; i++) {
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // latent conditioner attention block norm weight
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // latent conditioner attention block norm bias
-    buffer_size +=
-        3072 * 1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // latent conditioner key value query weight
-    buffer_size +=
-        3072 * ggml_type_sizef(
-                   GGML_TYPE_F32); // latent conditioner key value query bias
-    buffer_size +=
-        1024 * 1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // latent conditioner projection out weight
-    buffer_size +=
-        1024 * ggml_type_sizef(
-                   GGML_TYPE_F32); // latent conditioner projection out bias
-    buffer_size +=
-        16 * 32 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // latent conditioner relative position embeddings
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // latent conditioner attention block norm weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // latent conditioner attention block norm bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 3072 * 1024); // latent conditioner key value query weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 3072); // latent conditioner key value query bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024); // latent conditioner projection out weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // latent conditioner projection out bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 16 * 32); // latent conditioner relative position embeddings
                             // relative attention bias weight
   }
 
-  buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // code norm weight
-  buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // code norm bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // code norm weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // code norm bias
 
-  buffer_size += 1024 * 1024 *
-                 ggml_type_sizef(GGML_TYPE_F32); // time embed linear 0 weight
-  buffer_size +=
-      1024 * ggml_type_sizef(GGML_TYPE_F32); // time embed linear 0 bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024); // time embed linear 0 weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // time embed linear 0 bias
 
-  buffer_size += 1024 * 1024 *
-                 ggml_type_sizef(GGML_TYPE_F32); // time embed linear 1 weight
-  buffer_size +=
-      1024 * ggml_type_sizef(GGML_TYPE_F32); // time embed linear 1 bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024); // time embed linear 1 weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // time embed linear 1 bias
 
   // conditioning timestep integrator diffusion layers
   for (int i = 0; i < 3; i++) {
 
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.in_layers.0.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // conditioning_timestep_integrator.0.resblk.in_layers.0.weight
 
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.in_layers.0.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // conditioning_timestep_integrator.0.resblk.in_layers.0.bias
 
-    buffer_size +=
-        1024 * 1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.in_layers.2.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024); // conditioning_timestep_integrator.0.resblk.in_layers.2.weight
 
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.in_layers.2.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // conditioning_timestep_integrator.0.resblk.in_layers.2.bias
 
-    buffer_size +=
-        2048 * 1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.emb_layers.1.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 2048 * 1024); // conditioning_timestep_integrator.0.resblk.emb_layers.1.weight
 
-    buffer_size +=
-        2048 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.emb_layers.1.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 2048); // conditioning_timestep_integrator.0.resblk.emb_layers.1.bias
 
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.out_layers.0.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // conditioning_timestep_integrator.0.resblk.out_layers.0.weight
 
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.out_layers.0.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // conditioning_timestep_integrator.0.resblk.out_layers.0.bias
 
-    buffer_size +=
-        1024 * 1024 * 3 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.out_layers.3.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024 * 3); // conditioning_timestep_integrator.0.resblk.out_layers.3.weight
 
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.resblk.out_layers.3.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // conditioning_timestep_integrator.0.resblk.out_layers.3.bias
 
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.norm.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // conditioning_timestep_integrator.0.attn.norm.weight
 
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.norm.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // conditioning_timestep_integrator.0.attn.norm.bias
 
-    buffer_size +=
-        3072 * 1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.qkv.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 3072 * 1024); // conditioning_timestep_integrator.0.attn.qkv.weight
 
-    buffer_size +=
-        3072 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.qkv.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 3072); // conditioning_timestep_integrator.0.attn.qkv.bias
 
-    buffer_size +=
-        1024 * 1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.proj_out.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024); // conditioning_timestep_integrator.0.attn.proj_out.weight
 
-    buffer_size +=
-        1024 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.proj_out.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // conditioning_timestep_integrator.0.attn.proj_out.bias
 
-    buffer_size +=
-        32 * 16 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // conditioning_timestep_integrator.0.attn.relative_pos_embeddings.relative_attention_bias.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32 * 16); // conditioning_timestep_integrator.0.attn.relative_pos_embeddings.relative_attention_bias.weight
   }
 
-  buffer_size +=
-      3 * 100 * 1024 * ggml_type_sizef(GGML_TYPE_F32);  // inp_block weight
-  buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // inp_block bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 3 * 100 * 1024);  // inp_block weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // inp_block bias
 
-  buffer_size +=
-      2048 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // integrating_conv weight
-  buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // integrating conv bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 2048 * 1024); // integrating_conv weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // integrating conv bias
 
   // main diffusion layers
   for (int i = 0; i < 10; i++) {
 
-    buffer_size +=
-        1024 * ggml_type_sizef(GGML_TYPE_F32); // resblk.in_layers.0.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // resblk.in_layers.0.weight
 
-    buffer_size +=
-        1024 * ggml_type_sizef(GGML_TYPE_F32); // resblk.in_layers.0.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // resblk.in_layers.0.bias
 
-    buffer_size += 1024 * 1024 *
-                   ggml_type_sizef(GGML_TYPE_F32); // resblk.in_layers.2.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024); // resblk.in_layers.2.weight
 
-    buffer_size +=
-        1024 * ggml_type_sizef(GGML_TYPE_F32); // resblk.in_layers.2.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // resblk.in_layers.2.bias
 
-    buffer_size += 2048 * 1024 *
-                   ggml_type_sizef(GGML_TYPE_F32); // resblk.emb_layers.1.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 2048 * 1024); // resblk.emb_layers.1.weight
 
-    buffer_size +=
-        2048 * ggml_type_sizef(GGML_TYPE_F32); // resblk.emb_layers.1.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 2048); // resblk.emb_layers.1.bias
 
-    buffer_size +=
-        1024 * ggml_type_sizef(GGML_TYPE_F32); // resblk.out_layers.0.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // resblk.out_layers.0.weight
 
-    buffer_size +=
-        1024 * ggml_type_sizef(GGML_TYPE_F32); // resblk.out_layers.0.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // resblk.out_layers.0.bias
 
-    buffer_size += 1024 * 1024 * 3 *
-                   ggml_type_sizef(GGML_TYPE_F32); // resblk.out_layers.3.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024 * 3); // resblk.out_layers.3.weight
 
-    buffer_size +=
-        1024 * ggml_type_sizef(GGML_TYPE_F32); // resblk.out_layers.3.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // resblk.out_layers.3.bias
 
-    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // attn.norm.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // attn.norm.weight
 
-    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // attn.norm.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // attn.norm.bias
 
-    buffer_size +=
-        3072 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // attn.qkv.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 3072 * 1024); // attn.qkv.weight
 
-    buffer_size += 3072 * ggml_type_sizef(GGML_TYPE_F32); // attn.qkv.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 3072); // attn.qkv.bias
 
-    buffer_size +=
-        1024 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // attn.proj_out.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024); // attn.proj_out.weight
 
-    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // attn.proj_out.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // attn.proj_out.bias
 
-    buffer_size +=
-        32 * 16 *
-        ggml_type_sizef(
-            GGML_TYPE_F32); // attn.relative_pos_embeddings.relative_attention_bias.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32 * 16); // attn.relative_pos_embeddings.relative_attention_bias.weight
   }
 
   // main residual blocks
   for (int i = 0; i < 3; i++) {
 
-    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // in_layers.0.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // in_layers.0.weight
 
-    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // in_layers.0.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // in_layers.0.bias
 
-    buffer_size +=
-        1024 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // in_layers.2.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024); // in_layers.2.weight
 
-    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // in_layers.2.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // in_layers.2.bias
 
-    buffer_size +=
-        2048 * 1024 * ggml_type_sizef(GGML_TYPE_F32); // emb_layers.1.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 2048 * 1024); // emb_layers.1.weight
 
-    buffer_size += 2048 * ggml_type_sizef(GGML_TYPE_F32); // emb_layers.1.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 2048); // emb_layers.1.bias
 
-    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // out_layers.0.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // out_layers.0.weight
 
-    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // out_layers.0.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // out_layers.0.bias
 
-    buffer_size +=
-        1024 * 1024 * 3 * ggml_type_sizef(GGML_TYPE_F32); // out_layers.3.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 1024 * 3); // out_layers.3.weight
 
-    buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // out_layers.3.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // out_layers.3.bias
   }
 
-  buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // out group norm weight
-  buffer_size += 1024 * ggml_type_sizef(GGML_TYPE_F32); // out group norm bias
-  buffer_size +=
-      1024 * 200 * 3 * ggml_type_sizef(GGML_TYPE_F32); // out convolution weight
-  buffer_size +=
-      1024 * 200 * ggml_type_sizef(GGML_TYPE_F32); // out convolution bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // out group norm weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // out group norm bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 200 * 3); // out convolution weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024 * 200); // out convolution bias
 
-  buffer_size +=
-      1024 * ggml_type_sizef(GGML_TYPE_F32); // unconditioned embedding
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1024); // unconditioned embedding
 
   printf("%s: ggml tensor size    = %d bytes\n", __func__,
          (int)sizeof(ggml_tensor));
@@ -1208,7 +1074,7 @@ bool diffusion_model_load(const std::string &fname, diffusion_model &model) {
   }
 
   // initialize the backend
-#ifdef GGML_USE_CUBLAS
+#ifdef GGML_USE_CUDA
   fprintf(stderr, "%s: using CUDA backend\n", __func__);
   model.backend = ggml_backend_cuda_init(0);
   if (!model.backend) {
@@ -1684,74 +1550,45 @@ bool vocoder_model_load(const std::string &fname, vocoder_model &model) {
 
   size_t buffer_size = 0;
 
-  buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // pre convolution bias
-  buffer_size +=
-      32 * 64 * 7 * ggml_type_sizef(GGML_TYPE_F32); // pre convolution weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 32); // pre convolution bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 32 * 64 * 7); // pre convolution weight
 
   for (int i = 0; i < 3; i++) {
-    buffer_size +=
-        64 *
-        ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.input_conv.0.bias
-    buffer_size +=
-        64 * 100 * 5 *
-        ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.input_conv.0.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 64); // kernel_predictor.input_conv.0.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 64 * 100 * 5); // kernel_predictor.input_conv.0.weight
 
     for (int c = 0; c < 3; c++) {
 
-      buffer_size +=
-          64 * ggml_type_sizef(
-                   GGML_TYPE_F32); // kernel_predictor.residual_convs.0.1.bias
-      buffer_size +=
-          64 * 64 * 3 *
-          ggml_type_sizef(
-              GGML_TYPE_F32); // kernel_predictor.residual_convs.0.1.weight
-      buffer_size +=
-          64 * ggml_type_sizef(
-                   GGML_TYPE_F32); // kernel_predictor.residual_convs.0.3.bias
-      buffer_size +=
-          64 * 64 * 3 *
-          ggml_type_sizef(
-              GGML_TYPE_F32); // kernel_predictor.residual_convs.0.3.weight
+      buffer_size += ggml_row_size(GGML_TYPE_F32, 64); // kernel_predictor.residual_convs.0.1.bias
+      buffer_size += ggml_row_size(GGML_TYPE_F32, 64 * 64 * 3); // kernel_predictor.residual_convs.0.1.weight
+      buffer_size += ggml_row_size(GGML_TYPE_F32, 64); // kernel_predictor.residual_convs.0.3.bias
+      buffer_size += ggml_row_size(GGML_TYPE_F32, 64 * 64 * 3); // kernel_predictor.residual_convs.0.3.weight
     }
 
-    buffer_size +=
-        24576 *
-        ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.kernel_conv.bias
-    buffer_size +=
-        24576 * 64 * 3 *
-        ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.kernel_conv.weight
-    buffer_size +=
-        256 * ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.bias_conv.bias
-    buffer_size +=
-        256 * 64 * 3 *
-        ggml_type_sizef(GGML_TYPE_F32); // kernel_predictor.bias_conv.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 24576); // kernel_predictor.kernel_conv.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 24576 * 64 * 3); // kernel_predictor.kernel_conv.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 256); // kernel_predictor.bias_conv.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 256 * 64 * 3); // kernel_predictor.bias_conv.weight
 
     if (i < 2) {
-      buffer_size +=
-          32 * 32 * 16 * ggml_type_sizef(GGML_TYPE_F32); // convt_pre.1.weight
+      buffer_size += ggml_row_size(GGML_TYPE_F32, 32 * 32 * 16); // convt_pre.1.weight
     } else {
-      buffer_size +=
-          32 * 32 * 8 * ggml_type_sizef(GGML_TYPE_F32); // convt_pre.1.weight
+      buffer_size += ggml_row_size(GGML_TYPE_F32, 32 * 32 * 8); // convt_pre.1.weight
     }
 
-    buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // convt_pre.1.bias
-    buffer_size +=
-        32 * 32 * 3 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.0.1.weight
-    buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.0.1.bias
-    buffer_size +=
-        32 * 32 * 3 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.1.1.weight
-    buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.1.1.bias
-    buffer_size +=
-        32 * 32 * 3 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.2.1.weight
-    buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.2.1.bias
-    buffer_size +=
-        32 * 32 * 3 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.3.1.weight
-    buffer_size += 32 * ggml_type_sizef(GGML_TYPE_F32); // conv_blocks.3.1.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32); // convt_pre.1.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32 * 32 * 3); // conv_blocks.0.1.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32); // conv_blocks.0.1.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32 * 32 * 3); // conv_blocks.1.1.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32); // conv_blocks.1.1.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32 * 32 * 3); // conv_blocks.2.1.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32); // conv_blocks.2.1.bias
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32 * 32 * 3); // conv_blocks.3.1.weight
+    buffer_size += ggml_row_size(GGML_TYPE_F32, 32); // conv_blocks.3.1.bias
   }
 
-  buffer_size += ggml_type_sizef(GGML_TYPE_F32); // post convolution bias
-  buffer_size +=
-      32 * 7 * ggml_type_sizef(GGML_TYPE_F32); // post convolution weight
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 1); // post convolution bias
+  buffer_size += ggml_row_size(GGML_TYPE_F32, 32 * 7); // post convolution weight
 
   printf("%s: ggml tensor size    = %d bytes\n", __func__,
          (int)sizeof(ggml_tensor));
@@ -1772,7 +1609,7 @@ bool vocoder_model_load(const std::string &fname, vocoder_model &model) {
   }
 
   // initialize the backend
-#ifdef GGML_USE_CUBLAS
+#ifdef GGML_USE_CUDA
   fprintf(stderr, "%s: using CUDA backend\n", __func__);
   model.backend = ggml_backend_cuda_init(0);
   if (!model.backend) {
@@ -1794,6 +1631,7 @@ bool vocoder_model_load(const std::string &fname, vocoder_model &model) {
     // fallback to CPU backend
     fprintf(stderr, "%s: using CPU backend\n", __func__);
     model.backend = ggml_backend_cpu_init();
+    ggml_backend_cpu_set_n_threads(model.backend, 1); // FIXME: ggml crashes with more than 1 thread at the end of procesing
   }
 
   if (!model.backend) {
@@ -3172,7 +3010,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
       cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-      cur = ggml_group_norm(ctx0, cur, 32);
+      cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
       cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
@@ -3274,7 +3112,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
     cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-    cur = ggml_group_norm(ctx0, cur, 32);
+    cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
     cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
@@ -3337,7 +3175,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
       cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-      cur = ggml_group_norm(ctx0, cur, 32);
+      cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
       cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
@@ -3402,7 +3240,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
       cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-      cur = ggml_group_norm(ctx0, cur, 32);
+      cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
       cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
@@ -3463,7 +3301,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
       cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-      cur = ggml_group_norm(ctx0, cur, 32);
+      cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
       cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
@@ -3611,7 +3449,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
       cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-      cur = ggml_group_norm(ctx0, cur, 32);
+      cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
       cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
@@ -3671,7 +3509,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
       cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-      cur = ggml_group_norm(ctx0, cur, 32);
+      cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
       cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
@@ -3726,7 +3564,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
       cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-      cur = ggml_group_norm(ctx0, cur, 32);
+      cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
       cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
@@ -3826,7 +3664,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
     cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-    cur = ggml_group_norm(ctx0, cur, 32);
+    cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
     cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
@@ -3877,7 +3715,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
     cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-    cur = ggml_group_norm(ctx0, cur, 32);
+    cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
     cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 
@@ -3920,7 +3758,7 @@ struct ggml_cgraph *diffusion_graph(struct diffusion_model &model,
 
   cur = ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, cur->ne[1]);
 
-  cur = ggml_group_norm(ctx0, cur, 32);
+  cur = ggml_group_norm(ctx0, cur, 32, TORTOISE_NORM_EPSILON);
 
   cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], 1024);
 

@@ -23,7 +23,7 @@ This is tested with mac os arm
 ````
 mkdir build
 cd build
-cmake .. -DGGML_CUBLAS=ON
+cmake .. -DGGML_CUDA=ON
 make
 ````
 This is tested with Ubuntu 22.04 and cuda 12.0 and a 1070ti
