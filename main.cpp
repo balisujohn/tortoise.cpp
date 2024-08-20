@@ -25,6 +25,7 @@
 #include <random>
 #include <string>
 #include <vector>
+#include <numeric> // <= For std::partial_sum when using Microsft Visual C/C++
 
 #if defined(_MSC_VER)
 #pragma warning(disable : 4244 4267) // possible loss of data
