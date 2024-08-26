@@ -20,6 +20,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <numberic>
 #include <iostream>
 #include <map>
 #include <random>
